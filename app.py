@@ -38,120 +38,244 @@ USERS = {
 # ============================================================
 st.markdown("""
 <style>
-    /* Fondo general */
-    .stApp { background-color: #f0f4f8; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-    /* Tarjetas de métricas */
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* Fondo general con degradado sutil */
+    .stApp {
+        background: linear-gradient(180deg, #f4f7fb 0%, #eef2f8 100%);
+    }
+
+    /* Quitar el padding superior excesivo */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
+    /* Títulos generales */
+    h1 {
+        color: #14213d;
+        font-weight: 800 !important;
+        letter-spacing: -0.5px;
+    }
+    h2, h3 {
+        color: #1e293b;
+        font-weight: 700 !important;
+    }
+
+    /* ───────── Tarjetas de métricas ───────── */
     .metric-card {
-        background: white;
-        border-radius: 12px;
-        padding: 20px 24px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 22px 20px;
+        box-shadow: 0 4px 16px rgba(20, 33, 61, 0.06);
+        border: 1px solid #eef1f6;
         text-align: center;
-        margin-bottom: 12px;
+        margin-bottom: 14px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 24px rgba(20, 33, 61, 0.10);
     }
     .metric-card .label {
-        font-size: 13px;
-        color: #64748b;
-        font-weight: 600;
+        font-size: 12px;
+        color: #8a93a3;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.8px;
     }
     .metric-card .value {
-        font-size: 32px;
-        font-weight: 700;
-        color: #1e293b;
-        margin: 6px 0;
+        font-size: 30px;
+        font-weight: 800;
+        color: #14213d;
+        margin: 8px 0 4px 0;
+        line-height: 1.1;
     }
     .metric-card .sub {
         font-size: 12px;
-        color: #94a3b8;
+        color: #9aa3b2;
+        font-weight: 500;
     }
 
-    /* Encabezado de sección */
+    /* ───────── Encabezado de sección ───────── */
     .section-header {
-        background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
-        color: white;
-        padding: 14px 20px;
-        border-radius: 10px;
+        background: linear-gradient(120deg, #0f2747 0%, #2563eb 100%);
+        color: #ffffff;
+        padding: 16px 22px;
+        border-radius: 12px;
         font-size: 16px;
         font-weight: 700;
-        margin: 20px 0 14px 0;
-        letter-spacing: 0.3px;
+        margin: 26px 0 16px 0;
+        letter-spacing: 0.2px;
+        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.18);
     }
 
-    /* Badge de modelo ganador */
+    /* ───────── Badge de modelo ganador ───────── */
     .winner-badge {
-        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+        background: linear-gradient(120deg, #047857 0%, #10b981 100%);
         color: white;
-        padding: 6px 16px;
-        border-radius: 20px;
+        padding: 8px 20px;
+        border-radius: 24px;
         font-size: 13px;
         font-weight: 700;
         display: inline-block;
-        margin-bottom: 10px;
+        margin-bottom: 14px;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+        letter-spacing: 0.3px;
     }
 
-    /* Alertas de inventario */
-    .alert-danger {
-        background: #fef2f2;
-        border-left: 4px solid #ef4444;
-        padding: 12px 16px;
-        border-radius: 6px;
-        color: #991b1b;
-        margin: 8px 0;
+    /* ───────── Alertas de inventario ───────── */
+    .alert-danger, .alert-warning, .alert-success {
+        padding: 14px 18px;
+        border-radius: 10px;
+        margin: 10px 0;
         font-weight: 600;
+        font-size: 14.5px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .alert-danger {
+        background: #fff1f2;
+        border-left: 5px solid #ef4444;
+        color: #9f1239;
     }
     .alert-warning {
         background: #fffbeb;
-        border-left: 4px solid #f59e0b;
-        padding: 12px 16px;
-        border-radius: 6px;
+        border-left: 5px solid #f59e0b;
         color: #92400e;
-        margin: 8px 0;
-        font-weight: 600;
     }
     .alert-success {
         background: #f0fdf4;
-        border-left: 4px solid #22c55e;
-        padding: 12px 16px;
-        border-radius: 6px;
-        color: #14532d;
-        margin: 8px 0;
-        font-weight: 600;
+        border-left: 5px solid #22c55e;
+        color: #166534;
     }
 
-    /* Login */
-    .login-container {
-        max-width: 420px;
-        margin: 60px auto;
-        background: white;
-        padding: 40px;
-        border-radius: 16px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    /* ───────── Login ───────── */
+    .login-card-icon {
+        text-align: center;
+        margin-bottom: 18px;
     }
     .login-title {
         text-align: center;
-        font-size: 22px;
-        font-weight: 700;
-        color: #1e3a5f;
-        margin-bottom: 6px;
+        font-size: 24px;
+        font-weight: 800;
+        color: #14213d;
+        margin-bottom: 4px;
+        letter-spacing: -0.3px;
     }
     .login-sub {
         text-align: center;
-        font-size: 13px;
-        color: #64748b;
-        margin-bottom: 28px;
+        font-size: 13.5px;
+        color: #8a93a3;
+        margin-bottom: 30px;
+        font-weight: 500;
+    }
+    .login-footer-box {
+        text-align: center;
+        margin-top: 22px;
+        padding: 14px;
+        background: #f8fafc;
+        border-radius: 10px;
+        font-size: 12px;
+        color: #8a93a3;
+        line-height: 1.8;
     }
 
-    /* Sidebar */
-    .css-1d391kg { background-color: #1e3a5f !important; }
-    section[data-testid="stSidebar"] { background-color: #1e3a5f; }
-    section[data-testid="stSidebar"] * { color: white !important; }
+    /* ───────── Botones ───────── */
+    .stButton > button {
+        border-radius: 10px !important;
+        font-weight: 700 !important;
+        padding: 10px 20px !important;
+        border: none !important;
+        transition: all 0.15s ease !important;
+    }
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(120deg, #1e40af 0%, #2563eb 100%) !important;
+        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3) !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 18px rgba(37, 99, 235, 0.4) !important;
+    }
+    .stButton > button[kind="secondary"]:hover {
+        transform: translateY(-1px);
+    }
 
-    /* Ocultar footer de Streamlit */
+    /* ───────── Inputs y selects ───────── */
+    .stTextInput input, .stNumberInput input, .stSelectbox > div > div {
+        border-radius: 10px !important;
+    }
+
+    /* ───────── Tabs ───────── */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 6px;
+        background: #eef2f8;
+        padding: 6px;
+        border-radius: 12px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        font-weight: 600;
+        color: #64748b;
+        padding: 8px 18px;
+    }
+    .stTabs [aria-selected="true"] {
+        background: #ffffff !important;
+        color: #1e40af !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+
+    /* ───────── Dataframes ───────── */
+    [data-testid="stDataFrame"] {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    }
+
+    /* ───────── Sidebar ───────── */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f2747 0%, #14213d 100%);
+    }
+    section[data-testid="stSidebar"] * {
+        color: #e8edf5 !important;
+    }
+    section[data-testid="stSidebar"] hr {
+        border-color: rgba(255,255,255,0.12);
+    }
+    section[data-testid="stSidebar"] .stRadio > label {
+        font-weight: 600;
+    }
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
+        padding: 8px 10px;
+        border-radius: 8px;
+        margin-bottom: 2px;
+        transition: background 0.15s ease;
+    }
+    section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label:hover {
+        background: rgba(255,255,255,0.06);
+    }
+    section[data-testid="stSidebar"] .stButton > button {
+        background: rgba(255,255,255,0.08) !important;
+        color: #ffffff !important;
+        border: 1px solid rgba(255,255,255,0.15) !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: rgba(239,68,68,0.85) !important;
+        border-color: rgba(239,68,68,0.85) !important;
+    }
+
+    /* ───────── Info / Warning / Success boxes nativos ───────── */
+    [data-testid="stAlert"] {
+        border-radius: 12px;
+    }
+
+    /* Ocultar footer y menú de Streamlit */
     footer { visibility: hidden; }
     #MainMenu { visibility: hidden; }
+    header[data-testid="stHeader"] { background: transparent; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -283,8 +407,8 @@ def show_login():
     with col2:
         st.markdown('<br><br>', unsafe_allow_html=True)
         st.markdown("""
-        <div style="text-align:center; margin-bottom:20px;">
-            <span style="font-size:52px;">📦</span>
+        <div class="login-card-icon">
+            <span style="font-size:54px;">📦</span>
         </div>
         <div class="login-title">Sistema de Predicción de Demanda</div>
         <div class="login-sub">Machine Learning · Online Retail 2010-2011</div>
@@ -296,7 +420,8 @@ def show_login():
                                      type="password",
                                      placeholder="Ingresa tu contraseña")
             submit = st.form_submit_button("Ingresar →",
-                                           use_container_width=True)
+                                           use_container_width=True,
+                                           type="primary")
 
         if submit:
             if usuario in USERS and USERS[usuario] == password:
@@ -307,10 +432,10 @@ def show_login():
                 st.error("❌ Usuario o contraseña incorrectos.")
 
         st.markdown("""
-        <div style="text-align:center; margin-top:20px; font-size:12px; color:#94a3b8;">
-            <b>Usuarios de prueba:</b><br>
-            admin / admin123 &nbsp;|&nbsp;
-            gerente / gerente2026 &nbsp;|&nbsp;
+        <div class="login-footer-box">
+            <b>Usuarios de prueba</b><br>
+            admin / admin123 &nbsp;·&nbsp;
+            gerente / gerente2026 &nbsp;·&nbsp;
             analista / analista2026
         </div>
         """, unsafe_allow_html=True)
@@ -323,20 +448,24 @@ def show_login():
 def show_sidebar():
     with st.sidebar:
         st.markdown(f"""
-        <div style="text-align:center; padding:20px 0 10px;">
-            <div style="font-size:40px;">📦</div>
-            <div style="font-size:16px; font-weight:700; margin-top:6px;">
+        <div style="text-align:center; padding:24px 0 16px;">
+            <div style="font-size:42px;">📦</div>
+            <div style="font-size:17px; font-weight:800; margin-top:8px; letter-spacing:-0.2px;">
                 Predicción de Demanda
             </div>
-            <div style="font-size:12px; opacity:0.7; margin-top:4px;">
-                Online Retail ML · 2026
+            <div style="font-size:11.5px; opacity:0.65; margin-top:4px; letter-spacing:0.3px;">
+                ONLINE RETAIL ML · 2026
             </div>
         </div>
-        <hr style="border-color:rgba(255,255,255,0.2); margin:10px 0;">
+        <hr style="border-color:rgba(255,255,255,0.12); margin:8px 0 16px;">
         """, unsafe_allow_html=True)
 
-        st.markdown(f"**👤 {st.session_state.get('usuario','').upper()}**")
-        st.markdown("---")
+        st.markdown(f"""
+        <div style="background:rgba(255,255,255,0.06); padding:10px 14px;
+                    border-radius:10px; margin-bottom:18px; font-size:13.5px;">
+            👤 <b>{st.session_state.get('usuario','').upper()}</b>
+        </div>
+        """, unsafe_allow_html=True)
 
         pagina = st.radio(
             "Navegación",
@@ -350,7 +479,9 @@ def show_sidebar():
             label_visibility="collapsed"
         )
 
-        st.markdown("---")
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<hr style='border-color:rgba(255,255,255,0.12);'>",
+                    unsafe_allow_html=True)
         if st.button("🚪 Cerrar Sesión", use_container_width=True):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
