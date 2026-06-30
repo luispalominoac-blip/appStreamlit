@@ -44,9 +44,62 @@ st.markdown("""
         font-family: 'Inter', sans-serif;
     }
 
+    /* ───────── FORZAR TEXTO OSCURO EN TODA LA APP (fix texto blanco) ───────── */
+    .stApp, .stApp p, .stApp span, .stApp label, .stApp div,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5,
+    .stApp .stMarkdown, .stApp .stText {
+        color: #14213d !important;
+    }
+
+    /* Excepción: dentro del sidebar el texto debe ser claro */
+    section[data-testid="stSidebar"] *,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] div {
+        color: #e8edf5 !important;
+    }
+
+    /* Excepción: dentro de tarjetas de color (métricas, alertas, badges)
+       cada bloque define su propio color, así que NO se sobreescribe ahí */
+    .metric-card, .metric-card * ,
+    .section-header, .section-header *,
+    .winner-badge, .winner-badge *,
+    .alert-danger, .alert-danger *,
+    .alert-warning, .alert-warning *,
+    .alert-success, .alert-success *,
+    .login-footer-box, .login-footer-box * {
+        color: inherit !important;
+    }
+    .metric-card .label   { color: #8a93a3 !important; }
+    .metric-card .value   { color: #14213d !important; }
+    .metric-card .sub     { color: #9aa3b2 !important; }
+    .section-header       { color: #ffffff !important; }
+    .winner-badge         { color: #ffffff !important; }
+    .alert-danger         { color: #9f1239 !important; }
+    .alert-warning        { color: #92400e !important; }
+    .alert-success        { color: #166534 !important; }
+    .login-footer-box     { color: #8a93a3 !important; }
+    .login-title          { color: #14213d !important; }
+    .login-sub            { color: #8a93a3 !important; }
+
+    /* Botones siempre con texto blanco (tienen fondo de color) */
+    .stButton > button, .stButton > button * {
+        color: #ffffff !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button {
+        color: #ffffff !important;
+    }
+
+    /* Inputs: texto oscuro sobre fondo blanco */
+    input, textarea, select {
+        color: #14213d !important;
+        background-color: #ffffff !important;
+    }
+
     /* Fondo general con degradado sutil */
     .stApp {
-        background: linear-gradient(180deg, #f4f7fb 0%, #eef2f8 100%);
+        background: linear-gradient(180deg, #f4f7fb 0%, #eef2f8 100%) !important;
     }
 
     /* Quitar el padding superior excesivo */
