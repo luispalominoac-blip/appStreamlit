@@ -174,6 +174,13 @@ st.markdown(f"""
     .repo-date-box .day {{ font-size: 20px; line-height: 1; }}
     .repo-date-box .mon {{ font-size: 10px; letter-spacing: 0.5px; opacity: 0.85; }}
 
+    /* ───────── Badge informativo ───────── */
+    .demo-badge {{
+        display: inline-block; background: {C_WARNING_BG}; color: {C_WARNING} !important;
+        font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px;
+        border: 1px solid {C_WARNING}; letter-spacing: 0.3px; margin-bottom: 10px;
+    }}
+
     /* ───────── Login ───────── */
     .login-card-icon {{ text-align: center; margin-bottom: 16px; }}
     .login-box {{
@@ -387,6 +394,51 @@ def procesar_archivo(file_bytes, file_name):
     return df, None
 
 
+def generar_datos_demo():
+    """Genera un historial de ventas sintético pero realista (estacionalidad de
+    fin de año, cierre los domingos, variedad de productos y países) para que
+    cualquier persona pueda probar la plataforma sin subir un archivo propio."""
+    rng = np.random.default_rng(42)
+
+    productos_base = [
+        "Taza de cerámica edición floral", "Vela aromática de lavanda",
+        "Cuaderno artesanal tapa kraft", "Llavero de madera grabado",
+        "Bolsa de tela reutilizable", "Set de 6 lápices de color",
+        "Tarjeta postal ilustrada", "Maceta mini de cerámica",
+        "Termo de acero inoxidable 500ml", "Agenda 2026 tapa dura",
+        "Caja de regalo decorativa", "Manta polar suave",
+        "Peluche oso de felpa", "Set de té de 4 piezas",
+        "Lámpara LED de escritorio", "Portavasos de corcho x4",
+        "Espejo de bolsillo decorado", "Reloj de pared minimalista",
+        "Cojín decorativo geométrico", "Marco de fotos de madera",
+    ]
+    precios_base = rng.uniform(3.5, 48, size=len(productos_base)).round(2)
+    paises = ["Perú", "Chile", "Colombia", "México", "Argentina", "Ecuador"]
+    pesos_pais = rng.dirichlet(np.ones(len(paises)) * 2.2)
+
+    fechas = pd.date_range("2024-06-01", "2025-12-28", freq="D")
+    filas = []
+    for fecha in fechas:
+        if fecha.dayofweek == 6:  # domingo cerrado (perfil mayorista B2B)
+            continue
+        factor_temporada = 1.0
+        if fecha.month in (11, 12):
+            factor_temporada = 1.9
+        elif fecha.month in (9, 10):
+            factor_temporada = 1.25
+        n_transacciones = rng.poisson(16 * factor_temporada)
+        idx_productos = rng.integers(0, len(productos_base), size=n_transacciones)
+        for idx in idx_productos:
+            cantidad = max(1, int(rng.gamma(2.1, 4.2)))
+            precio = round(float(precios_base[idx]) * float(rng.uniform(0.95, 1.05)), 2)
+            pais = rng.choice(paises, p=pesos_pais)
+            filas.append({
+                "Fecha": fecha, "Producto": productos_base[idx],
+                "Cantidad": cantidad, "Precio": precio, "Pais": pais,
+            })
+    return pd.DataFrame(filas)
+
+
 @st.cache_data(show_spinner=False)
 def entrenar_sistema(df_raw, col_fecha, col_producto, col_cantidad, col_precio, col_pais):
     df = df_raw.copy()
@@ -394,9 +446,10 @@ def entrenar_sistema(df_raw, col_fecha, col_producto, col_cantidad, col_precio, 
         col_fecha: 'Fecha', col_producto: 'Producto',
         col_cantidad: 'Cantidad', col_precio: 'Precio',
     })
-    df['Pais'] = df[col_pais] if col_pais else 'General'
     if col_pais:
         df = df.rename(columns={col_pais: 'Pais'})
+    else:
+        df['Pais'] = 'General'
 
     df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
     df = df.dropna(subset=['Fecha', 'Producto', 'Cantidad', 'Precio'])
@@ -472,28 +525,32 @@ def predecir_producto(payload, producto, pais=None, semanas_adelante=1):
     ultima_semana = hist['Semana'].max()
     anio_actual   = hist['Anio'].max()
 
-    semana_obj, anio_obj = ultima_semana + semanas_adelante, anio_actual
-    if semana_obj > 52:
-        semana_obj -= 52
-        anio_obj += 1
-    mes_obj  = min(12, max(1, round(semana_obj / 4.33)))
-    trim_obj = ((mes_obj - 1) // 3) + 1
-
     try: pais_code = le_pais.transform([pais])[0]
     except Exception: pais_code = 0
     try: prod_code = le_prod.transform([producto])[0]
     except Exception: prod_code = 0
 
-    entrada = pd.DataFrame([[precio_prom, pais_code, mes_obj, trim_obj,
-                             semana_obj, 3, anio_obj, pedidos_prom, prod_code]], columns=features)
-    pred = max(0, round(modelo.predict(scaler.transform(entrada))[0]))
-    return pred
+    # Suma las predicciones semana a semana hasta el horizonte solicitado,
+    # para que la incertidumbre acumulada se refleje de forma más realista.
+    total_predicho = 0
+    for paso in range(1, semanas_adelante + 1):
+        semana_obj, anio_obj = ultima_semana + paso, anio_actual
+        if semana_obj > 52:
+            semana_obj -= 52
+            anio_obj += 1
+        mes_obj  = min(12, max(1, round(semana_obj / 4.33)))
+        trim_obj = ((mes_obj - 1) // 3) + 1
+        entrada = pd.DataFrame([[precio_prom, pais_code, mes_obj, trim_obj,
+                                 semana_obj, 3, anio_obj, pedidos_prom, prod_code]], columns=features)
+        total_predicho += max(0, modelo.predict(scaler.transform(entrada))[0])
+
+    return round(total_predicho)
 
 
-def calcular_estado_inventario(payload, producto, stock_actual):
+def calcular_estado_inventario(payload, producto, stock_actual, semanas_adelante=1):
     df_agg = payload['df_agg']
     hist = df_agg[df_agg['Producto'] == producto]
-    demanda_pred = predecir_producto(payload, producto, semanas_adelante=1)
+    demanda_pred = predecir_producto(payload, producto, semanas_adelante=semanas_adelante)
     if demanda_pred is None:
         return None
 
@@ -501,9 +558,9 @@ def calcular_estado_inventario(payload, producto, stock_actual):
     if pd.isna(std_hist) or std_hist == 0:
         std_hist = hist['Cantidad'].mean() * 0.3
 
-    stock_seguridad  = round(1.65 * std_hist)
+    stock_seguridad  = round(1.65 * std_hist * (semanas_adelante ** 0.5))
     punto_reposicion = demanda_pred + stock_seguridad
-    demanda_diaria   = demanda_pred / 7 if demanda_pred > 0 else 0.01
+    demanda_diaria   = demanda_pred / (7 * semanas_adelante) if demanda_pred > 0 else 0.01
     dias_cobertura   = round(stock_actual / demanda_diaria)
 
     if stock_actual < stock_seguridad:
@@ -522,7 +579,58 @@ def calcular_estado_inventario(payload, producto, stock_actual):
         'estado': estado, 'unidades_sugeridas': round(unidades_sugeridas),
         'fecha_sugerida_dt': fecha_sugerida,
         'fecha_sugerida': fecha_sugerida.strftime('%d/%m/%Y'),
+        'semanas_adelante': semanas_adelante,
     }
+
+
+def generar_reporte_excel(df_reporte):
+    """Genera un archivo .xlsx real (no un CSV disfrazado) con encabezado de
+    marca y colores por estado, listo para enviar a un proveedor o jefe."""
+    from openpyxl.styles import PatternFill, Font, Alignment
+    from openpyxl.utils import get_column_letter
+
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df_reporte.to_excel(writer, index=False, sheet_name='Inventario', startrow=1)
+        ws = writer.sheets['Inventario']
+
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(df_reporte.columns))
+        titulo_cell = ws.cell(row=1, column=1)
+        titulo_cell.value = f"StockSense · Reporte de inventario — {datetime.now().strftime('%d/%m/%Y')}"
+        titulo_cell.font = Font(bold=True, color='FFFFFF', size=12)
+        titulo_cell.fill = PatternFill(start_color='1E3A8A', end_color='1E3A8A', fill_type='solid')
+        titulo_cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.row_dimensions[1].height = 24
+
+        header_fill = PatternFill(start_color='3B82F6', end_color='3B82F6', fill_type='solid')
+        header_font = Font(color='FFFFFF', bold=True)
+        for col_idx in range(1, len(df_reporte.columns) + 1):
+            cell = ws.cell(row=2, column=col_idx)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center')
+
+        estado_colors = {
+            'Crítico': 'FCA5A5', 'Atención': 'FDE68A',
+            'Exceso': 'BFDBFE', 'Óptimo': 'BBF7D0',
+        }
+        if 'Estado' in df_reporte.columns:
+            estado_col_idx = df_reporte.columns.get_loc('Estado') + 1
+            for row_idx in range(3, len(df_reporte) + 3):
+                estado_val = ws.cell(row=row_idx, column=estado_col_idx).value
+                color = estado_colors.get(estado_val)
+                if color:
+                    fill = PatternFill(start_color=color, end_color=color, fill_type='solid')
+                    for col_idx in range(1, len(df_reporte.columns) + 1):
+                        ws.cell(row=row_idx, column=col_idx).fill = fill
+
+        for col_idx, col_name in enumerate(df_reporte.columns, start=1):
+            max_len = max(df_reporte[col_name].astype(str).map(len).max(), len(str(col_name))) + 3
+            ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len, 45)
+        ws.freeze_panes = 'A3'
+
+    buffer.seek(0)
+    return buffer
 
 
 # ============================================================
@@ -600,12 +708,38 @@ def show_sidebar():
             st.session_state['_force_config'] = True
             st.rerun()
 
+        if 'payload' in st.session_state:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Cargar otro historial", use_container_width=True):
+                for k in ['payload', 'stock_data']:
+                    st.session_state.pop(k, None)
+                st.session_state['_force_config'] = True
+                st.rerun()
+
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("<hr>", unsafe_allow_html=True)
         if st.button("Cerrar sesión", use_container_width=True):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
+
+
+# ============================================================
+#  CARGA DE DATOS COMPARTIDA (archivo real o demo)
+# ============================================================
+
+def cargar_datos_demo():
+    with st.spinner("Generando datos de ejemplo y entrenando el modelo..."):
+        df_demo = generar_datos_demo()
+        payload, err = entrenar_sistema(df_demo, 'Fecha', 'Producto', 'Cantidad', 'Precio', 'Pais')
+    if err:
+        st.error(err)
+        return
+    st.session_state['payload'] = payload
+    st.session_state['stock_data'] = {}
+    st.session_state['es_demo'] = True
+    st.success("Datos de ejemplo cargados. Explora el panel en la pestaña Inicio.")
+    st.rerun()
 
 
 # ============================================================
@@ -627,17 +761,22 @@ def view_inicio():
             **3.** En segundos tendrás tu panel con alertas de inventario, predicciones
             de ventas y reportes listos para compartir.
             """)
-            if st.button("Subir mi historial de ventas", type="primary", use_container_width=True):
-                st.session_state['_force_config'] = True
-                st.rerun()
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button("Subir mi historial de ventas", type="primary", use_container_width=True):
+                    st.session_state['_force_config'] = True
+                    st.rerun()
+            with col_b:
+                if st.button("Probar con datos de ejemplo", use_container_width=True):
+                    cargar_datos_demo()
         with col2:
             subtle_header("Lo que vas a obtener")
             st.markdown("""
             - Qué productos se te van a acabar
             - Qué productos te están sobrando
-            - Cuánto vas a vender la próxima semana
+            - Cuánto vas a vender en las próximas semanas
             - Sugerencias de cuánto y cuándo reponer
-            - Reportes listos para tu equipo o proveedores
+            - Reportes en Excel listos para tu equipo o proveedores
             """)
         footer_credits()
         return
@@ -648,6 +787,9 @@ def view_inicio():
 
     if 'stock_data' not in st.session_state:
         st.session_state['stock_data'] = {}
+
+    if st.session_state.get('es_demo'):
+        st.markdown('<span class="demo-badge">🧪 Estás viendo datos de ejemplo</span>', unsafe_allow_html=True)
 
     productos_muestra = productos[:60] if len(productos) > 60 else productos
     estados = []
@@ -669,6 +811,16 @@ def view_inicio():
 
     st.caption(f"Última actualización: {payload['fecha_proceso'].strftime('%d/%m/%Y %H:%M')}  ·  "
               f"Confiabilidad del modelo: {payload['confiabilidad']:.0f}%")
+
+    with st.expander("📘 ¿Cómo leer este panel?"):
+        st.markdown("""
+        - **Por agotarse**: el stock está por debajo del mínimo de seguridad; hay que reponer ya.
+        - **Necesitan atención**: llegarán a su punto de reposición pronto; conviene planificar el pedido.
+        - **Con exceso**: tienes más stock del que normalmente necesitas; evalúa una promoción o pausar compras.
+        - **Ventas próx. semana**: unidades que el modelo estima que venderás en los próximos 7 días, en total.
+
+        Los cálculos se basan en tu historial real de ventas: a más datos, mayor precisión.
+        """)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1: metric_card("Por agotarse", f"{len(criticos)}", "riesgo crítico", "danger")
@@ -746,7 +898,7 @@ def view_inventario():
     preseleccionado = st.session_state.pop('producto_detalle', None)
 
     subtle_header("Buscar un producto")
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([2.4, 1, 1])
     with col1:
         idx = productos.index(preseleccionado) if preseleccionado in productos else 0
         producto = st.selectbox("Producto", productos, index=idx, label_visibility="collapsed")
@@ -756,8 +908,11 @@ def view_inventario():
         stock_actual = st.number_input("Stock actual", min_value=0, max_value=1000000,
                                        value=valor_default, step=1)
         st.session_state['stock_data'][producto] = stock_actual
+    with col3:
+        horizonte = st.selectbox("Horizonte", [1, 2, 3, 4],
+                                 format_func=lambda x: f"{x} semana(s)")
 
-    info = calcular_estado_inventario(payload, producto, stock_actual)
+    info = calcular_estado_inventario(payload, producto, stock_actual, semanas_adelante=horizonte)
     if info is None:
         st.warning("No hay suficiente historial para este producto.")
         return
@@ -772,7 +927,7 @@ def view_inventario():
     st.markdown(f'<div class="{clase}">{texto}</div>', unsafe_allow_html=True)
 
     col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_card("Demanda estimada", f"{info['demanda_predicha']:,}", "unidades próxima semana")
+    with col1: metric_card("Demanda estimada", f"{info['demanda_predicha']:,}", f"unidades en {horizonte} semana(s)")
     with col2: metric_card("Stock de seguridad", f"{info['stock_seguridad']:,}", "mínimo recomendado")
     with col3: metric_card("Punto de reposición", f"{info['punto_reposicion']:,}", "umbral para pedir")
     with col4: metric_card("Cobertura actual", f"{info['dias_cobertura']} días", "con el stock de hoy")
@@ -792,8 +947,8 @@ def view_inventario():
         ax.plot(range(len(hist)), hist['Cantidad'], color=C_ACCENT_SOFT,
                linewidth=2.2, marker='o', markersize=4, markerfacecolor=C_ACCENT_SOFT)
         ax.fill_between(range(len(hist)), hist['Cantidad'], alpha=0.15, color=C_ACCENT_SOFT)
-        ax.axhline(info['demanda_predicha'], color=C_SUCCESS, linestyle='--', linewidth=2,
-                  label=f"Predicción próxima semana: {info['demanda_predicha']}")
+        ax.axhline(info['demanda_predicha'] / horizonte, color=C_SUCCESS, linestyle='--', linewidth=2,
+                  label=f"Promedio semanal estimado: {info['demanda_predicha'] / horizonte:.0f}")
         step = max(1, len(x_labels)//12)
         ax.set_xticks(range(0, len(x_labels), step))
         ax.set_xticklabels(x_labels[::step], rotation=40, fontsize=8)
@@ -809,18 +964,30 @@ def view_inventario():
         st.info("Historial insuficiente para mostrar tendencia gráfica.")
 
     section_header("Todos tus productos")
+    busqueda = st.text_input("Buscar producto por nombre", placeholder="Escribe para filtrar...",
+                             label_visibility="collapsed")
+    productos_filtrados = [p for p in productos if busqueda.lower() in p.lower()] if busqueda else productos
+
+    LIMITE_TABLA = 300
     tabla = []
-    for p in productos[:200]:
+    for p in productos_filtrados[:LIMITE_TABLA]:
         s = st.session_state['stock_data'].get(p)
         if s is None:
             s = int(df_agg[df_agg['Producto']==p]['Cantidad'].mean()*2)
         i = calcular_estado_inventario(payload, p, s)
         if i:
             tabla.append({
-                'Producto': p[:50], 'Stock actual': s, 'Demanda estimada': i['demanda_predicha'],
+                'Producto': p[:50], 'Stock actual': s, 'Demanda estimada (1 sem.)': i['demanda_predicha'],
                 'Estado': {'critico':'Crítico','atencion':'Atención',
                           'exceso':'Exceso','optimo':'Óptimo'}[i['estado']],
             })
+
+    if len(productos_filtrados) > LIMITE_TABLA:
+        st.caption(f"Mostrando los primeros {LIMITE_TABLA} de {len(productos_filtrados):,} productos encontrados. "
+                  "Usa el buscador para encontrar uno específico.")
+    elif busqueda:
+        st.caption(f"{len(productos_filtrados):,} producto(s) encontrado(s) de {len(productos):,} en total.")
+
     st.dataframe(pd.DataFrame(tabla), use_container_width=True, height=380)
     footer_credits()
 
@@ -836,9 +1003,14 @@ def view_predicciones():
     if 'stock_data' not in st.session_state:
         st.session_state['stock_data'] = {}
 
-    st.markdown("Planifica tus próximos pedidos antes de que falte stock. "
-               "Los productos se ordenan por urgencia: primero los que necesitas "
-               "reponer más pronto.")
+    col_txt, col_h = st.columns([3, 1])
+    with col_txt:
+        st.markdown("Planifica tus próximos pedidos antes de que falte stock. "
+                   "Los productos se ordenan por urgencia: primero los que necesitas "
+                   "reponer más pronto.")
+    with col_h:
+        horizonte = st.selectbox("Horizonte de planificación", [1, 2, 3, 4],
+                                 format_func=lambda x: f"Próximas {x} semana(s)")
 
     productos = df_agg['Producto'].unique()
     eventos = []
@@ -847,7 +1019,7 @@ def view_predicciones():
         if s is None:
             s = int(df_agg[df_agg['Producto']==p]['Cantidad'].mean()*2)
             st.session_state['stock_data'][p] = s
-        info = calcular_estado_inventario(payload, p, s)
+        info = calcular_estado_inventario(payload, p, s, semanas_adelante=horizonte)
         if info and info['unidades_sugeridas'] > 0:
             info['producto'] = p
             eventos.append(info)
@@ -951,15 +1123,21 @@ def view_reportes():
     section_header("Vista previa del reporte")
     st.dataframe(df_reporte, use_container_width=True, height=340)
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        csv = df_reporte.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("Descargar reporte en Excel (CSV)", data=csv,
-                          file_name=f"reporte_inventario_{datetime.now().strftime('%Y%m%d')}.csv",
-                          mime='text/csv', use_container_width=True, type="primary")
+        excel_buffer = generar_reporte_excel(df_reporte)
+        st.download_button("📊 Descargar en Excel (.xlsx)", data=excel_buffer,
+                          file_name=f"reporte_inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                          mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                          use_container_width=True, type="primary")
     with col2:
+        csv = df_reporte.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("Descargar en CSV", data=csv,
+                          file_name=f"reporte_inventario_{datetime.now().strftime('%Y%m%d')}.csv",
+                          mime='text/csv', use_container_width=True)
+    with col3:
         resumen_txt = generar_resumen_texto(df_reporte)
-        st.download_button("Descargar resumen ejecutivo (TXT)", data=resumen_txt.encode('utf-8'),
+        st.download_button("Resumen ejecutivo (TXT)", data=resumen_txt.encode('utf-8'),
                           file_name=f"resumen_ejecutivo_{datetime.now().strftime('%Y%m%d')}.txt",
                           mime='text/plain', use_container_width=True)
     footer_credits()
@@ -999,6 +1177,16 @@ def view_configuracion():
     tab1, tab2 = st.tabs(["Cargar historial de ventas", "Usuarios y acceso"])
 
     with tab1:
+        subtle_header("¿No tienes un archivo a la mano?")
+        col_demo1, col_demo2 = st.columns([3, 1])
+        with col_demo1:
+            st.caption("Prueba la plataforma al instante con un historial de ventas de ejemplo "
+                      "(tienda de regalos, 18 meses de datos).")
+        with col_demo2:
+            if st.button("Usar datos de ejemplo", use_container_width=True):
+                cargar_datos_demo()
+
+        st.markdown("<br>", unsafe_allow_html=True)
         subtle_header("Sube tu historial de ventas")
         st.markdown("""
         Acepta archivos en formato **Excel (.xlsx)**, **CSV (.csv)** o **ZIP**.
@@ -1062,6 +1250,8 @@ def view_configuracion():
                         st.error(err)
                     else:
                         st.session_state['payload'] = payload
+                        st.session_state['stock_data'] = {}
+                        st.session_state['es_demo'] = False
                         st.success("Tu información fue analizada correctamente.")
                         col1, col2, col3 = st.columns(3)
                         with col1: metric_card("Registros procesados", f"{len(payload['df_raw']):,}", "ventas válidas")
