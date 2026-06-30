@@ -369,7 +369,6 @@ def detectar_columnas(df):
     return mapeo, faltantes
 
 
-@st.cache_data(show_spinner=False)
 def procesar_archivo(file_bytes, file_name):
     try:
         if file_name.endswith('.zip'):
@@ -1014,11 +1013,29 @@ def view_configuracion():
         uploaded = st.file_uploader("Arrastra tu archivo aquí",
                                     type=['csv', 'xlsx', 'xls', 'zip'])
 
-        if uploaded:
-            df_raw, error = procesar_archivo(io.BytesIO(uploaded.read()), uploaded.name)
+        if uploaded is not None:
+            # Si es un archivo nuevo (distinto al último procesado), lo leemos una sola vez
+            # y lo guardamos en memoria de sesión. Esto evita errores silenciosos al releer
+            # el archivo en cada interacción de la página (selects, botones, etc.).
+            if st.session_state.get('_last_uploaded_name') != uploaded.name:
+                df_raw, error = procesar_archivo(io.BytesIO(uploaded.getvalue()), uploaded.name)
+                st.session_state['_df_raw_cargado'] = df_raw
+                st.session_state['_error_carga'] = error
+                st.session_state['_last_uploaded_name'] = uploaded.name
+
+            df_raw = st.session_state.get('_df_raw_cargado')
+            error  = st.session_state.get('_error_carga')
+
             if error:
-                st.error(error)
+                st.error(f"No se pudo procesar el archivo: {error}")
+            elif df_raw is None or len(df_raw) == 0:
+                st.error("El archivo se leyó pero no contiene filas de datos. Verifica que no esté vacío.")
             else:
+                st.caption(f"Archivo leído correctamente: {len(df_raw):,} filas, "
+                          f"{len(df_raw.columns)} columnas detectadas.")
+                with st.expander("Ver columnas encontradas en tu archivo"):
+                    st.write(list(df_raw.columns))
+
                 mapeo, faltantes = detectar_columnas(df_raw)
                 if faltantes:
                     st.warning(f"No pudimos identificar automáticamente: **{', '.join(faltantes)}**. "
@@ -1029,6 +1046,11 @@ def view_configuracion():
                         seleccion_manual[campo] = st.selectbox(f"¿Cuál columna es '{campo}'?",
                                                                cols_disponibles, key=f"map_{campo}")
                     mapeo.update(seleccion_manual)
+                else:
+                    st.success(f"Columnas identificadas automáticamente: "
+                             f"fecha → '{mapeo['fecha']}', producto → '{mapeo['producto']}', "
+                             f"cantidad → '{mapeo['cantidad']}', precio → '{mapeo['precio']}'"
+                             + (f", país → '{mapeo['pais']}'" if mapeo.get('pais') else ""))
 
                 if st.button("Confirmar y analizar mi información", type="primary",
                            use_container_width=True):
