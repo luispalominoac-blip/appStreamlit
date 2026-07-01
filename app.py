@@ -1,20 +1,18 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
+import zipfile
 import io
 import warnings
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, r2_score
 
 warnings.filterwarnings('ignore')
 
-# ============================================================
-#  CONFIGURACIÓN GENERAL
-# ============================================================
 st.set_page_config(
     page_title="StockSense | Predicción de Inventario",
     page_icon="📦",
@@ -28,9 +26,6 @@ USERS = {
     "analista": "analista2026",
 }
 
-# ============================================================
-#  PALETA DE COLORES (referencia única, evita inconsistencias)
-# ============================================================
 C_BG          = "#0b1d33"
 C_BG_SOFT     = "#11253f"
 C_CARD        = "#16304f"
@@ -48,27 +43,20 @@ C_SUCCESS_BG  = "#0f3322"
 C_WHITE_CARD  = "#ffffff"
 C_DARK_TEXT   = "#0b1d33"
 
-# ============================================================
-#  ESTILOS CSS (exactamente iguales a tu versión)
-# ============================================================
 st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-
     html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
-
     .stApp {{
         background: linear-gradient(180deg, {C_BG} 0%, #0d2138 100%) !important;
     }}
     .block-container {{ padding-top: 1.2rem; padding-bottom: 3rem; max-width: 1280px; }}
-
     .stApp, .stApp p, .stApp span, .stApp label,
     .stApp .stMarkdown, .stApp .stText, .stApp li {{
         color: {C_TEXT} !important;
     }}
-    h1, h2, h3, h4 {{ color: {C_TEXT} !important; font-weight: 800 !important; letter-spacing: -0.3px; }}
-    .stCaption, [data-testid="stCaptionContainer"] {{ color: {C_TEXT_DIM} !important; }}
-
+    h1, h2, h3, h4 {{ color: {C_TEXT} !important; font-weight: 800 !important; }}
+    .stCaption {{ color: {C_TEXT_DIM} !important; }}
     .topbar {{
         display: flex; align-items: center; justify-content: space-between;
         padding: 14px 22px; background: {C_BG_SOFT};
@@ -84,19 +72,12 @@ st.markdown(f"""
     }}
     .topbar-brand .brand-name {{ font-size: 17px; font-weight: 800; color: {C_TEXT}; }}
     .topbar-brand .brand-sub {{ font-size: 11px; color: {C_TEXT_DIM}; letter-spacing: 0.4px; }}
-    .topbar-user {{
-        font-size: 13px; color: {C_TEXT_DIM}; text-align: right;
-    }}
+    .topbar-user {{ font-size: 13px; color: {C_TEXT_DIM}; text-align: right; }}
     .topbar-user b {{ color: {C_TEXT}; }}
-
     .metric-card {{
-        background: {C_WHITE_CARD};
-        border-radius: 14px;
-        padding: 20px 20px;
-        text-align: center;
-        margin-bottom: 12px;
-        box-shadow: 0 6px 18px rgba(0,0,0,0.22);
-        border-top: 4px solid #cbd5e1;
+        background: {C_WHITE_CARD}; border-radius: 14px; padding: 20px;
+        text-align: center; margin-bottom: 12px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.22); border-top: 4px solid #cbd5e1;
     }}
     .metric-card.danger  {{ border-top-color: #dc2626; }}
     .metric-card.warning {{ border-top-color: #d97706; }}
@@ -108,25 +89,21 @@ st.markdown(f"""
     }}
     .metric-card .value {{
         font-size: 29px; font-weight: 800; color: {C_DARK_TEXT} !important;
-        margin: 7px 0 3px 0; line-height: 1.1;
+        margin: 7px 0 3px 0;
     }}
-    .metric-card .sub {{ font-size: 11.5px; color: #8a93a3 !important; font-weight: 500; }}
-
+    .metric-card .sub {{ font-size: 11.5px; color: #8a93a3 !important; }}
     .section-header {{
         background: linear-gradient(120deg, {C_ACCENT} 0%, #1e3a8a 100%);
         color: #ffffff !important; padding: 13px 20px; border-radius: 10px;
         font-size: 15px; font-weight: 700; margin: 24px 0 14px 0;
-        letter-spacing: 0.2px;
     }}
     .section-header * {{ color: #ffffff !important; }}
-
     .subtle-header {{
-        font-size: 14px; font-weight: 700; color: {C_TEXT_DIM} !important;
+        font-size: 13px; font-weight: 700; color: {C_TEXT_DIM} !important;
         text-transform: uppercase; letter-spacing: 0.6px;
         margin: 20px 0 10px 0; padding-bottom: 8px;
         border-bottom: 1px solid {C_CARD_BORDER};
     }}
-
     .alert-danger, .alert-warning, .alert-success {{
         padding: 13px 18px; border-radius: 10px; margin: 9px 0;
         font-weight: 600; font-size: 14px;
@@ -135,61 +112,26 @@ st.markdown(f"""
     .alert-warning {{ background: {C_WARNING_BG}; border-left: 4px solid {C_WARNING}; color: #fde68a !important; }}
     .alert-success {{ background: {C_SUCCESS_BG}; border-left: 4px solid {C_SUCCESS}; color: #bbf7d0 !important; }}
     .alert-danger *, .alert-warning *, .alert-success * {{ color: inherit !important; }}
-
     .product-row {{
-        background: {C_CARD};
-        border-radius: 10px;
-        padding: 13px 18px;
-        margin-bottom: 7px;
-        border: 1px solid {C_CARD_BORDER};
-        border-left: 4px solid #475569;
+        background: {C_CARD}; border-radius: 10px; padding: 13px 18px;
+        margin-bottom: 7px; border: 1px solid {C_CARD_BORDER}; border-left: 4px solid #475569;
     }}
     .product-row.danger  {{ border-left-color: {C_DANGER}; }}
     .product-row.warning {{ border-left-color: {C_WARNING}; }}
-    .product-row.success {{ border-left-color: {C_SUCCESS}; }}
     .product-row b {{ color: {C_TEXT} !important; }}
     .product-row span {{ color: {C_TEXT_DIM} !important; }}
-
-    .repo-card {{
-        background: {C_CARD};
-        border: 1px solid {C_CARD_BORDER};
-        border-radius: 12px;
-        padding: 16px 18px;
-        margin-bottom: 10px;
-        display: flex; align-items: center; justify-content: space-between;
-    }}
-    .repo-date-box {{
-        min-width: 76px; text-align: center; padding: 8px 10px;
-        border-radius: 10px; font-weight: 800; margin-right: 16px;
-    }}
-    .repo-date-box .day {{ font-size: 20px; line-height: 1; }}
-    .repo-date-box .mon {{ font-size: 10px; letter-spacing: 0.5px; opacity: 0.85; }}
-
-    .demo-badge {{
-        display: inline-block; background: {C_WARNING_BG}; color: {C_WARNING} !important;
-        font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px;
-        border: 1px solid {C_WARNING}; letter-spacing: 0.3px; margin-bottom: 10px;
-    }}
-
-    .login-card-icon {{ text-align: center; margin-bottom: 16px; }}
-    .login-box {{
-        background: {C_BG_SOFT}; border: 1px solid {C_CARD_BORDER};
-        border-radius: 18px; padding: 36px 34px;
-    }}
     .login-title {{
         text-align: center; font-size: 23px; font-weight: 800;
         color: {C_TEXT} !important; margin-bottom: 4px;
     }}
     .login-sub {{
-        text-align: center; font-size: 13px; color: {C_TEXT_DIM} !important;
-        margin-bottom: 26px;
+        text-align: center; font-size: 13px; color: {C_TEXT_DIM} !important; margin-bottom: 26px;
     }}
     .login-footer-box {{
         text-align: center; margin-top: 18px; padding: 12px;
         background: rgba(255,255,255,0.04); border-radius: 10px;
         font-size: 11.5px; color: {C_TEXT_DIM} !important; line-height: 1.8;
     }}
-
     .stTextInput input, .stNumberInput input {{
         background-color: {C_BG_SOFT} !important;
         color: {C_TEXT} !important;
@@ -199,18 +141,13 @@ st.markdown(f"""
     .stSelectbox > div > div {{
         background-color: {C_BG_SOFT} !important;
         border: 1px solid {C_CARD_BORDER} !important;
-        border-radius: 9px !important;
-        color: {C_TEXT} !important;
+        border-radius: 9px !important; color: {C_TEXT} !important;
     }}
     .stSelectbox div[data-baseweb="select"] span {{ color: {C_TEXT} !important; }}
     div[data-baseweb="popover"] li {{
-        background-color: {C_BG_SOFT} !important;
-        color: {C_TEXT} !important;
+        background-color: {C_BG_SOFT} !important; color: {C_TEXT} !important;
     }}
-    div[data-baseweb="popover"] li:hover {{
-        background-color: {C_CARD} !important;
-    }}
-
+    div[data-baseweb="popover"] li:hover {{ background-color: {C_CARD} !important; }}
     .stButton > button {{
         border-radius: 9px !important; font-weight: 700 !important;
         padding: 9px 18px !important; border: none !important;
@@ -221,11 +158,9 @@ st.markdown(f"""
         box-shadow: 0 4px 14px rgba(59,130,246,0.35) !important;
     }}
     .stButton > button[kind="secondary"] {{
-        background: {C_CARD} !important;
-        color: {C_TEXT} !important;
+        background: {C_CARD} !important; color: {C_TEXT} !important;
         border: 1px solid {C_CARD_BORDER} !important;
     }}
-
     .stTabs [data-baseweb="tab-list"] {{
         gap: 4px; background: {C_BG_SOFT}; padding: 6px;
         border-radius: 12px; border: 1px solid {C_CARD_BORDER};
@@ -239,37 +174,25 @@ st.markdown(f"""
         background: {C_ACCENT} !important; color: #ffffff !important;
     }}
     .stTabs [aria-selected="true"] p {{ color: #ffffff !important; }}
-
     [data-testid="stDataFrame"] {{
         border-radius: 12px; overflow: hidden; border: 1px solid {C_CARD_BORDER};
     }}
-
     section[data-testid="stSidebar"] {{
-        background: #081628 !important;
-        border-right: 1px solid {C_CARD_BORDER};
+        background: #081628 !important; border-right: 1px solid {C_CARD_BORDER};
     }}
     section[data-testid="stSidebar"] * {{ color: {C_TEXT} !important; }}
     section[data-testid="stSidebar"] hr {{ border-color: {C_CARD_BORDER}; }}
     section[data-testid="stSidebar"] .stButton > button {{
-        background: {C_CARD} !important;
-        color: {C_TEXT} !important;
-        border: 1px solid {C_CARD_BORDER} !important;
-        width: 100%;
+        background: {C_CARD} !important; color: {C_TEXT} !important;
+        border: 1px solid {C_CARD_BORDER} !important; width: 100%;
     }}
     section[data-testid="stSidebar"] .stButton > button:hover {{
-        background: {C_DANGER} !important;
-        border-color: {C_DANGER} !important;
-        color: #ffffff !important;
+        background: {C_DANGER} !important; color: #ffffff !important;
     }}
-
-    [data-testid="stAlert"] {{ border-radius: 10px; }}
-
     .footer-credits {{
         text-align: center; font-size: 11px; color: {C_TEXT_DIM} !important;
-        margin-top: 46px; padding-top: 16px;
-        border-top: 1px solid {C_CARD_BORDER};
+        margin-top: 46px; padding-top: 16px; border-top: 1px solid {C_CARD_BORDER};
     }}
-
     footer {{ visibility: hidden; }}
     #MainMenu {{ visibility: hidden; }}
     header[data-testid="stHeader"] {{ background: transparent; }}
@@ -277,9 +200,7 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# ============================================================
-#  HELPERS DE UI
-# ============================================================
+# ── Helpers UI ────────────────────────────────────────────────
 
 def metric_card(label, value, sub="", tone="info"):
     st.markdown(f"""
@@ -287,312 +208,224 @@ def metric_card(label, value, sub="", tone="info"):
         <div class="label">{label}</div>
         <div class="value">{value}</div>
         <div class="sub">{sub}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
+    </div>""", unsafe_allow_html=True)
 
 def section_header(title):
     st.markdown(f'<div class="section-header">{title}</div>', unsafe_allow_html=True)
 
-
 def subtle_header(title):
     st.markdown(f'<div class="subtle-header">{title}</div>', unsafe_allow_html=True)
-
 
 def footer_credits():
     st.markdown("""
     <div class="footer-credits">
         StockSense &nbsp;·&nbsp; Plataforma de predicción de demanda e inventario<br>
         Desarrollado por Sara Camila Mayorca Parra &amp; Luis Alejandro Palomino Acuña
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
-
-def configurar_matplotlib_oscuro():
+def setup_plot():
     plt.rcParams.update({
-        'figure.facecolor':  C_CARD,
-        'axes.facecolor':    C_CARD,
-        'savefig.facecolor': C_CARD,
-        'axes.edgecolor':    C_CARD_BORDER,
-        'axes.labelcolor':   C_TEXT,
-        'xtick.color':       C_TEXT_DIM,
-        'ytick.color':       C_TEXT_DIM,
-        'text.color':        C_TEXT,
-        'axes.titlecolor':   C_TEXT,
-        'grid.color':        '#22436b',
-        'font.family':       'sans-serif',
+        'figure.facecolor': C_CARD, 'axes.facecolor': C_CARD,
+        'savefig.facecolor': C_CARD, 'axes.edgecolor': C_CARD_BORDER,
+        'axes.labelcolor': C_TEXT, 'xtick.color': C_TEXT_DIM,
+        'ytick.color': C_TEXT_DIM, 'text.color': C_TEXT,
+        'axes.titlecolor': C_TEXT, 'grid.color': '#22436b',
     })
 
-configurar_matplotlib_oscuro()
+setup_plot()
 
 
-# ============================================================
-#  MOTOR DE DATOS Y MODELO (PRE-ENTRENADO)
-# ============================================================
+# ── Detección de columnas ─────────────────────────────────────
 
-@st.cache_resource(show_spinner=False)
-def cargar_modelo_y_datos():
-    """Carga el modelo entrenado, scaler, encoder y dataset histórico.
-    Estos archivos deben estar en el mismo directorio que la app.
-    Se obtienen desde el notebook de la tesis con:
-        joblib.dump(modelo, 'modelo_rf_optimizado.pkl')
-        joblib.dump(scaler, 'scaler.pkl')
-        joblib.dump(le_country, 'le_country.pkl')
-        joblib.dump(features, 'features.pkl')
-        df_agg.to_csv('df_agg_online_retail.csv', index=False)
-    """
-    modelo  = joblib.load('modelo_rf_optimizado.pkl')
-    scaler  = joblib.load('scaler.pkl')
-    le_pais = joblib.load('le_country.pkl')
-    features = joblib.load('features.pkl')  # lista exacta: ['UnitPrice','Country_Code','Month',...]
+COLS_MAP = {
+    'fecha':    ['fecha', 'date', 'invoicedate', 'fecha_venta', 'invoice date'],
+    'producto': ['producto', 'product', 'description', 'item', 'articulo', 'nombre'],
+    'cantidad': ['cantidad', 'quantity', 'qty', 'unidades', 'units'],
+    'precio':   ['precio', 'price', 'unitprice', 'precio_unitario', 'unit price', 'valor'],
+}
+COLS_OPT = {
+    'pais': ['pais', 'país', 'country', 'tienda', 'store', 'sucursal', 'region'],
+}
 
-    # El dataset agregado ya contiene las columnas necesarias
-    df_agg = pd.read_csv('df_agg_online_retail.csv')
-    # Renombrar columnas a nombres en español para la interfaz
-    df_agg = df_agg.rename(columns={
-        'UnitPrice': 'Precio',
-        'Country':   'Pais',        # asumimos que existe la columna Country
-        'Quantity':  'Cantidad',
-        'Transacciones': 'Pedidos',
-        'Month':     'Mes',
-        'Quarter':   'Trimestre',
-        'DayOfWeek': 'DiaSemana',
-        'Hour':      'Hora',
-        'Year':      'Anio',
-        'Week':      'Semana'
-    })
-    # Si el dataset no tiene 'Pais', lo creamos a partir del código
-    if 'Pais' not in df_agg.columns and 'Country_Code' in df_agg.columns:
-        # Intentar mapear de vuelta con le_pais
-        df_agg['Pais'] = le_pais.inverse_transform(df_agg['Country_Code'])
+def detectar_columnas(df):
+    cols_lower = {c.lower().strip().replace(' ', ''): c for c in df.columns}
+    mapeo, faltantes = {}, []
+    for campo, alias in COLS_MAP.items():
+        alias_clean = [a.replace(' ', '') for a in alias]
+        encontrado = next((cols_lower[a] for a in alias_clean if a in cols_lower), None)
+        if encontrado:
+            mapeo[campo] = encontrado
+        else:
+            faltantes.append(campo)
+    for campo, alias in COLS_OPT.items():
+        alias_clean = [a.replace(' ', '') for a in alias]
+        encontrado = next((cols_lower[a] for a in alias_clean if a in cols_lower), None)
+        if encontrado:
+            mapeo[campo] = encontrado
+    return mapeo, faltantes
 
-    # Métricas finales del modelo (obtenidas del notebook)
-    metricas = {
-        'mae': 24.28,
-        'rmse': 92.58,
-        'r2': 0.29,
-        'confiabilidad': 73,  # %
-    }
 
+# ── Motor: carga y entrenamiento ─────────────────────────────
+
+def cargar_archivo(file_bytes, file_name):
+    nombre = file_name.lower()
+    try:
+        if nombre.endswith('.zip'):
+            with zipfile.ZipFile(file_bytes) as z:
+                xlsx = [f for f in z.namelist() if f.endswith(('.xlsx','.xls'))][0]
+                with z.open(xlsx) as f:
+                    return pd.read_excel(f), None
+        elif nombre.endswith(('.xlsx', '.xls')):
+            return pd.read_excel(file_bytes), None
+        elif nombre.endswith('.csv'):
+            return pd.read_csv(file_bytes), None
+        else:
+            return None, "Formato no soportado. Usa .xlsx, .csv o .zip"
+    except Exception as e:
+        return None, f"Error al leer el archivo: {e}"
+
+
+def entrenar(df_raw, col_fecha, col_producto, col_cantidad, col_precio, col_pais):
+    df = df_raw[[col_fecha, col_producto, col_cantidad, col_precio]].copy()
+    df.columns = ['Fecha', 'Producto', 'Cantidad', 'Precio']
+
+    if col_pais and col_pais in df_raw.columns:
+        df['Pais'] = df_raw[col_pais].values
+    else:
+        df['Pais'] = 'General'
+
+    df['Fecha'] = pd.to_datetime(df['Fecha'], errors='coerce')
+    df['Cantidad'] = pd.to_numeric(df['Cantidad'], errors='coerce')
+    df['Precio']   = pd.to_numeric(df['Precio'], errors='coerce')
+    df = df.dropna(subset=['Fecha', 'Producto', 'Cantidad', 'Precio'])
+    df = df[df['Cantidad'] > 0]
+    df = df[df['Precio'] > 0]
+    df = df.drop_duplicates()
+
+    if len(df) < 10:
+        return None, "No hay suficientes registros válidos (mínimo 10) para generar predicciones."
+
+    df['Mes']       = df['Fecha'].dt.month
+    df['Trimestre'] = df['Fecha'].dt.quarter
+    df['DiaSemana'] = df['Fecha'].dt.dayofweek
+    df['Semana']    = df['Fecha'].dt.isocalendar().week.astype(int)
+    df['Anio']      = df['Fecha'].dt.year
+
+    df_agg = df.groupby(['Anio','Semana','Producto','Pais']).agg(
+        Cantidad  = ('Cantidad', 'sum'),
+        Precio    = ('Precio', 'mean'),
+        Mes       = ('Mes', 'first'),
+        Trimestre = ('Trimestre', 'first'),
+        DiaSemana = ('DiaSemana', 'mean'),
+        Pedidos   = ('Cantidad', 'count'),
+    ).reset_index()
+
+    le_pais = LabelEncoder()
+    le_prod = LabelEncoder()
+    df_agg['Pais_Code']    = le_pais.fit_transform(df_agg['Pais'])
+    df_agg['Producto_Code'] = le_prod.fit_transform(df_agg['Producto'])
+
+    features = ['Precio','Pais_Code','Mes','Trimestre','Semana','DiaSemana','Anio','Pedidos','Producto_Code']
+    X, y = df_agg[features], df_agg['Cantidad']
+
+    if len(df_agg) < 20:
+        X_train, X_test, y_train, y_test = X, X, y, y
+    else:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    scaler = StandardScaler()
+    Xtr = scaler.fit_transform(X_train)
+    Xte = scaler.transform(X_test)
+
+    modelo = RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42, n_jobs=-1)
+    modelo.fit(Xtr, y_train)
+    pred = modelo.predict(Xte)
+
+    r2 = max(0, r2_score(y_test, pred))
     return {
-        'modelo': modelo,
-        'scaler': scaler,
-        'le_pais': le_pais,
-        'features': features,
-        'df_agg': df_agg,
-        'metricas': metricas,
-    }
+        'df': df, 'df_agg': df_agg, 'features': features,
+        'scaler': scaler, 'le_pais': le_pais, 'le_prod': le_prod,
+        'modelo': modelo, 'confiabilidad': round(min(95, max(55, r2*100)), 0),
+        'ts': datetime.now(),
+    }, None
 
 
-def predecir_producto(payload, producto, pais=None, semanas_adelante=1):
-    """Predice la cantidad total de unidades a vender en las próximas N semanas
-    para un producto y país dados. Utiliza el modelo pre‑entrenado exactamente
-    con las 9 variables que se usaron en la tesis."""
-    df_agg  = payload['df_agg']
-    modelo  = payload['modelo']
-    scaler  = payload['scaler']
-    le_pais = payload['le_pais']
-    features = payload['features']  # ['UnitPrice','Country_Code','Month','Quarter','Week','DayOfWeek','Hour','Year','Transacciones']
+# ── Predicción e inventario ───────────────────────────────────
 
+def predecir(p, producto, semanas=1):
+    df_agg, le_pais, le_prod = p['df_agg'], p['le_pais'], p['le_prod']
     hist = df_agg[df_agg['Producto'] == producto]
     if len(hist) == 0:
-        return None
-
-    # Si no se especifica país, usar el más frecuente en el historial del producto
-    if pais is None:
-        pais = hist['Pais'].mode().iloc[0]
-
-    # Calcular promedios del producto
-    precio_prom   = hist['Precio'].mean()
-    pedidos_prom  = hist['Pedidos'].mean()          # antes llamado Transacciones
-    hora_prom     = hist['Hora'].mean() if 'Hora' in hist else 12  # hora media de pedidos
-
-    # Última semana registrada
-    ultima_semana = hist['Semana'].max()
-    anio_actual   = hist['Anio'].max()
-
-    # Codificar país
-    try:
-        pais_code = le_pais.transform([pais])[0]
-    except:
-        pais_code = 0
-
-    # Acumular predicción semana a semana (igual que en el notebook)
-    total_predicho = 0
-    for paso in range(1, semanas_adelante + 1):
-        semana_obj = ultima_semana + paso
-        anio_obj   = anio_actual
-        if semana_obj > 52:
-            semana_obj -= 52
-            anio_obj   += 1
-        # Estimar mes y trimestre a partir de la semana (aproximado)
-        mes_obj  = min(12, max(1, round(semana_obj / 4.33)))
-        trim_obj = (mes_obj - 1) // 3 + 1
-        # Asumimos jueves (3) como día típico de compra
-        dia_sem  = 3
-
-        entrada = pd.DataFrame([[
-            precio_prom, pais_code, mes_obj, trim_obj,
-            semana_obj, dia_sem, hora_prom, anio_obj, pedidos_prom
-        ]], columns=features)
-        entrada_s = scaler.transform(entrada)
-        total_predicho += max(0, modelo.predict(entrada_s)[0])
-
-    return round(total_predicho)
+        return 0
+    pais = hist['Pais'].mode().iloc[0]
+    precio = hist['Precio'].mean()
+    pedidos = hist['Pedidos'].mean()
+    sem = hist['Semana'].max() + semanas
+    anio = hist['Anio'].max()
+    if sem > 52: sem -= 52; anio += 1
+    mes = min(12, max(1, round(sem / 4.33)))
+    trim = ((mes-1)//3)+1
+    try: pc = le_pais.transform([pais])[0]
+    except: pc = 0
+    try: prod_c = le_prod.transform([producto])[0]
+    except: prod_c = 0
+    entrada = pd.DataFrame([[precio, pc, mes, trim, sem, 3, anio, pedidos, prod_c]], columns=p['features'])
+    return max(0, round(p['modelo'].predict(p['scaler'].transform(entrada))[0]))
 
 
-def calcular_estado_inventario(payload, producto, stock_actual, pais=None, semanas_adelante=1):
-    """Calcula el estado del inventario (crítico, atención, exceso, óptimo)
-    para un producto, usando la predicción semanal y el stock de seguridad."""
-    df_agg = payload['df_agg']
-    hist = df_agg[df_agg['Producto'] == producto]
-    demanda_pred = predecir_producto(payload, producto, pais, semanas_adelante)
-    if demanda_pred is None:
-        return None
-
-    # Desviación estándar histórica para el stock de seguridad
-    std_hist = hist['Cantidad'].std()
-    if pd.isna(std_hist) or std_hist == 0:
-        std_hist = hist['Cantidad'].mean() * 0.3
-
-    # Stock de seguridad (factor 1.65 para nivel de servicio del 95%)
-    stock_seguridad  = round(1.65 * std_hist * (semanas_adelante ** 0.5))
-    punto_reposicion = demanda_pred + stock_seguridad
-    demanda_diaria   = demanda_pred / (7 * semanas_adelante) if demanda_pred > 0 else 0.01
-    dias_cobertura   = round(stock_actual / demanda_diaria) if demanda_diaria > 0 else 999
-
-    if stock_actual < stock_seguridad:
-        estado, unidades_sugeridas = 'critico', max(0, punto_reposicion + demanda_pred - stock_actual)
-    elif stock_actual < punto_reposicion:
-        estado, unidades_sugeridas = 'atencion', max(0, punto_reposicion - stock_actual)
-    elif stock_actual > punto_reposicion * 1.8:
-        estado, unidades_sugeridas = 'exceso', 0
-    else:
-        estado, unidades_sugeridas = 'optimo', 0
-
-    fecha_sugerida = datetime.now() + timedelta(days=max(1, dias_cobertura - 2))
-    return {
-        'demanda_predicha': demanda_pred,
-        'stock_seguridad': stock_seguridad,
-        'punto_reposicion': round(punto_reposicion),
-        'dias_cobertura': dias_cobertura,
-        'estado': estado,
-        'unidades_sugeridas': round(unidades_sugeridas),
-        'fecha_sugerida_dt': fecha_sugerida,
-        'fecha_sugerida': fecha_sugerida.strftime('%d/%m/%Y'),
-        'semanas_adelante': semanas_adelante,
-    }
+def estado_inventario(p, producto, stock):
+    hist = p['df_agg'][p['df_agg']['Producto'] == producto]
+    dem = predecir(p, producto)
+    std = hist['Cantidad'].std()
+    if pd.isna(std) or std == 0: std = hist['Cantidad'].mean() * 0.3
+    seg = round(1.65 * std)
+    repo = dem + seg
+    dd = dem/7 if dem > 0 else 0.01
+    dias = round(stock / dd)
+    if stock < seg: est, unis = 'critico', max(0, repo + dem - stock)
+    elif stock < repo: est, unis = 'atencion', max(0, repo - stock)
+    elif stock > repo * 1.8: est, unis = 'exceso', 0
+    else: est, unis = 'optimo', 0
+    fecha = datetime.now() + timedelta(days=max(1, dias-2))
+    return {'dem': dem, 'seg': int(seg), 'repo': int(repo), 'dias': dias,
+            'estado': est, 'unis': int(unis),
+            'fecha_dt': fecha, 'fecha': fecha.strftime('%d/%m/%Y')}
 
 
-# ============================================================
-#  REPORTES (Excel, CSV, TXT) – se mantienen igual
-# ============================================================
-def generar_reporte_excel(df_reporte):
-    from openpyxl.styles import PatternFill, Font, Alignment
-    from openpyxl.utils import get_column_letter
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df_reporte.to_excel(writer, index=False, sheet_name='Inventario', startrow=1)
-        ws = writer.sheets['Inventario']
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(df_reporte.columns))
-        titulo_cell = ws.cell(row=1, column=1)
-        titulo_cell.value = f"StockSense · Reporte de inventario — {datetime.now().strftime('%d/%m/%Y')}"
-        titulo_cell.font = Font(bold=True, color='FFFFFF', size=12)
-        titulo_cell.fill = PatternFill(start_color='1E3A8A', end_color='1E3A8A', fill_type='solid')
-        titulo_cell.alignment = Alignment(horizontal='center', vertical='center')
-        ws.row_dimensions[1].height = 24
-        header_fill = PatternFill(start_color='3B82F6', end_color='3B82F6', fill_type='solid')
-        header_font = Font(color='FFFFFF', bold=True)
-        for col_idx in range(1, len(df_reporte.columns) + 1):
-            cell = ws.cell(row=2, column=col_idx)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal='center')
-        estado_colors = {'Crítico': 'FCA5A5', 'Atención': 'FDE68A',
-                         'Exceso': 'BFDBFE', 'Óptimo': 'BBF7D0'}
-        if 'Estado' in df_reporte.columns:
-            estado_col_idx = df_reporte.columns.get_loc('Estado') + 1
-            for row_idx in range(3, len(df_reporte) + 3):
-                estado_val = ws.cell(row=row_idx, column=estado_col_idx).value
-                color = estado_colors.get(estado_val)
-                if color:
-                    fill = PatternFill(start_color=color, end_color=color, fill_type='solid')
-                    for col_idx in range(1, len(df_reporte.columns) + 1):
-                        ws.cell(row=row_idx, column=col_idx).fill = fill
-        for col_idx, col_name in enumerate(df_reporte.columns, start=1):
-            max_len = max(df_reporte[col_name].astype(str).map(len).max(), len(str(col_name))) + 3
-            ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len, 45)
-        ws.freeze_panes = 'A3'
-    buffer.seek(0)
-    return buffer
+# ── Login ─────────────────────────────────────────────────────
 
-
-def generar_resumen_texto(df_reporte):
-    criticos = df_reporte[df_reporte['Estado'] == 'Crítico']
-    exceso   = df_reporte[df_reporte['Estado'] == 'Exceso']
-    total_demanda = df_reporte['Demanda estimada (próx. semana)'].sum()
-    lineas_criticos = chr(10).join(
-        '- ' + str(r['Producto'])[:60] + f" (pedir {r['Unidades sugeridas a pedir']} unidades)"
-        for _, r in criticos.head(15).iterrows())
-    lineas_exceso = chr(10).join('- ' + str(r['Producto'])[:60] for _, r in exceso.head(15).iterrows())
-    return f"""RESUMEN EJECUTIVO DE INVENTARIO
-Generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}
-{'='*50}
-
-VENTAS ESTIMADAS PROXIMA SEMANA: {total_demanda:,.0f} unidades
-
-PRODUCTOS EN RIESGO CRITICO: {len(criticos)}
-{lineas_criticos}
-
-PRODUCTOS CON SOBRESTOCK: {len(exceso)}
-{lineas_exceso}
-
-{'='*50}
-Reporte generado por StockSense
-"""
-
-
-# ============================================================
-#  LOGIN
-# ============================================================
 def show_login():
-    col1, col2, col3 = st.columns([1, 1.3, 1])
-    with col2:
+    c1, c2, c3 = st.columns([1, 1.3, 1])
+    with c2:
         st.markdown('<br><br>', unsafe_allow_html=True)
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        st.markdown("""
-        <div class="login-card-icon"><span style="font-size:48px;">📦</span></div>
-        <div class="login-title">StockSense</div>
-        <div class="login-sub">Predicción inteligente de demanda e inventario</div>
+        st.markdown(f"""
+        <div style="background:{C_BG_SOFT}; border:1px solid {C_CARD_BORDER};
+                    border-radius:18px; padding:36px 34px;">
+            <div style="text-align:center; font-size:48px; margin-bottom:14px;">📦</div>
+            <div class="login-title">StockSense</div>
+            <div class="login-sub">Predicción inteligente de demanda e inventario</div>
         """, unsafe_allow_html=True)
-
-        with st.form("login_form"):
-            usuario  = st.text_input("Usuario", placeholder="Ingresa tu usuario")
-            password = st.text_input("Contraseña", type="password", placeholder="Ingresa tu contraseña")
-            submit   = st.form_submit_button("Ingresar", use_container_width=True, type="primary")
-
-        if submit:
+        with st.form("lf"):
+            usuario  = st.text_input("Usuario", placeholder="Tu usuario")
+            password = st.text_input("Contraseña", type="password", placeholder="Tu contraseña")
+            ok = st.form_submit_button("Ingresar", use_container_width=True, type="primary")
+        if ok:
             if usuario in USERS and USERS[usuario] == password:
-                st.session_state['logged_in'] = True
-                st.session_state['usuario'] = usuario
+                st.session_state.update({'logged_in': True, 'usuario': usuario})
                 st.rerun()
             else:
                 st.error("Usuario o contraseña incorrectos.")
-
-        st.markdown("""
-        <div class="login-footer-box">
-            <b>Acceso de demostración</b><br>
-            admin / admin123 &nbsp;·&nbsp; gerente / gerente2026 &nbsp;·&nbsp; analista / analista2026
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown(f"""
+            <div class="login-footer-box">
+                Acceso demo: admin / admin123
+            </div>
+        </div>""", unsafe_allow_html=True)
 
 
-# ============================================================
-#  TOPBAR Y SIDEBAR
-# ============================================================
+# ── Topbar y sidebar ──────────────────────────────────────────
+
 def show_topbar():
-    usuario = st.session_state.get('usuario', '')
+    u = st.session_state.get('usuario', '')
     st.markdown(f"""
     <div class="topbar">
         <div class="topbar-brand">
@@ -602,509 +435,449 @@ def show_topbar():
                 <div class="brand-sub">INVENTARIO INTELIGENTE</div>
             </div>
         </div>
-        <div class="topbar-user">Sesión activa<br><b>{usuario.upper()}</b></div>
-    </div>
-    """, unsafe_allow_html=True)
-
+        <div class="topbar-user">Sesión activa<br><b>{u.upper()}</b></div>
+    </div>""", unsafe_allow_html=True)
 
 def show_sidebar():
     with st.sidebar:
-        st.markdown("""
+        st.markdown(f"""
         <div style="text-align:center; padding:10px 0 18px;">
             <div style="font-size:34px;">📦</div>
             <div style="font-size:15px; font-weight:800; margin-top:6px;">StockSense</div>
         </div>
-        <hr>
+        <hr style="border-color:{C_CARD_BORDER};">
         """, unsafe_allow_html=True)
-        st.markdown("**Cuenta**")
-        st.caption(st.session_state.get('usuario', '').upper())
-
+        st.caption(f"Usuario: {st.session_state.get('usuario','').upper()}")
         st.markdown("<br>", unsafe_allow_html=True)
-        # Botón para recargar el modelo (por si hay actualizaciones)
-        if st.button("Recargar modelo", use_container_width=True):
-            st.cache_resource.clear()
+        if st.button("Configuración y datos", use_container_width=True):
+            st.session_state['_cfg'] = True
             st.rerun()
-
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown(f"<hr style='border-color:{C_CARD_BORDER};'>", unsafe_allow_html=True)
         if st.button("Cerrar sesión", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
+            st.session_state.clear()
             st.rerun()
 
 
-# ============================================================
-#  VISTA: INICIO
-# ============================================================
-def view_inicio():
-    payload = st.session_state['payload']
-    df_agg  = payload['df_agg']
-    productos = df_agg['Producto'].unique()
+# ── Página: Configuración ─────────────────────────────────────
 
-    if 'stock_data' not in st.session_state:
-        st.session_state['stock_data'] = {}
+def page_config():
+    st.markdown("## Configuración y datos")
+    t1, t2 = st.tabs(["Cargar historial de ventas", "Usuarios"])
 
-    productos_muestra = productos[:60] if len(productos) > 60 else productos
-    estados = []
-    for p in productos_muestra:
-        stock_actual = st.session_state['stock_data'].get(p)
-        if stock_actual is None:
-            hist_prod = df_agg[df_agg['Producto'] == p]['Cantidad']
-            stock_actual = int(hist_prod.mean() * 2) if len(hist_prod) else 50
-            st.session_state['stock_data'][p] = stock_actual
-        info = calcular_estado_inventario(payload, p, stock_actual)
-        if info:
-            info['producto'], info['stock_actual'] = p, stock_actual
-            estados.append(info)
-
-    criticos = [e for e in estados if e['estado'] == 'critico']
-    atencion = [e for e in estados if e['estado'] == 'atencion']
-    exceso   = [e for e in estados if e['estado'] == 'exceso']
-    demanda_total = sum(e['demanda_predicha'] for e in estados)
-
-    st.caption(f"Modelo entrenado con Online Retail 2010-2011 | "
-              f"Confiabilidad: {payload['metricas']['confiabilidad']:.0f}%")
-
-    with st.expander("📘 ¿Cómo leer este panel?"):
+    with t1:
+        subtle_header("Sube tu historial de ventas")
         st.markdown("""
-        - **Por agotarse**: el stock está por debajo del mínimo de seguridad; hay que reponer ya.
-        - **Necesitan atención**: llegarán a su punto de reposición pronto; conviene planificar el pedido.
-        - **Con exceso**: tienes más stock del que normalmente necesitas; evalúa una promoción o pausar compras.
-        - **Ventas próx. semana**: unidades que el modelo estima que venderás en los próximos 7 días, en total.
+        Sube un archivo **Excel (.xlsx)**, **CSV (.csv)** o **ZIP**.
+        El archivo debe tener columnas de: **fecha**, **producto**, **cantidad** y **precio**.
+        Los nombres exactos pueden variar — el sistema los detecta automáticamente.
         """)
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_card("Por agotarse", f"{len(criticos)}", "riesgo crítico", "danger")
-    with col2: metric_card("Necesitan atención", f"{len(atencion)}", "bajo nivel ideal", "warning")
-    with col3: metric_card("Con exceso", f"{len(exceso)}", "sobrestock", "info")
-    with col4: metric_card("Ventas próx. semana", f"{demanda_total:,.0f}", "unidades estimadas", "success")
+        uploaded = st.file_uploader("Selecciona tu archivo", type=['csv','xlsx','xls','zip'])
 
-    section_header("¿Qué productos se te van a acabar?")
-    if criticos:
-        for e in sorted(criticos, key=lambda x: x['dias_cobertura'])[:8]:
-            col_a, col_b = st.columns([4, 1])
-            with col_a:
-                st.markdown(f"""
-                <div class="product-row danger">
-                    <b>{e['producto'][:60]}</b><br>
-                    <span style="font-size:13px;">
-                        Se agota en {e['dias_cobertura']} días · Stock actual: {e['stock_actual']} ·
-                        Sugerido pedir <b>{e['unidades_sugeridas']} unidades</b> antes del {e['fecha_sugerida']}
-                    </span>
-                </div>""", unsafe_allow_html=True)
-            with col_b:
-                if st.button("Ver detalle", key=f"crit_{e['producto']}", use_container_width=True):
-                    st.session_state['producto_detalle'] = e['producto']
-                    st.session_state['_force_inventario'] = True
-                    st.rerun()
-    else:
-        st.markdown('<div class="alert-success">No tienes productos en riesgo crítico de desabastecimiento.</div>',
-                   unsafe_allow_html=True)
+        if uploaded is not None:
+            # Guardamos los bytes en session_state para no re-leer en cada rerun
+            if st.session_state.get('_uf_name') != uploaded.name:
+                st.session_state['_uf_bytes'] = uploaded.getvalue()
+                st.session_state['_uf_name']  = uploaded.name
 
-    section_header("¿Qué productos te están sobrando?")
-    if exceso:
-        for e in exceso[:6]:
-            st.markdown(f"""
-            <div class="product-row warning">
-                <b>{e['producto'][:60]}</b><br>
-                <span style="font-size:13px;">
-                    Stock actual: {e['stock_actual']} unidades · Demanda estimada: {e['demanda_predicha']} unidades/semana
-                </span>
-            </div>""", unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="alert-success">No se detecta sobrestock relevante en tu inventario.</div>',
-                   unsafe_allow_html=True)
+            file_bytes = io.BytesIO(st.session_state['_uf_bytes'])
+            df_raw, error = cargar_archivo(file_bytes, uploaded.name)
 
-    section_header("¿Cuánto vas a vender la próxima semana?")
-    top_demanda = sorted(estados, key=lambda x: -x['demanda_predicha'])[:6]
-    df_top = pd.DataFrame([{'Producto': e['producto'][:38], 'Unidades': e['demanda_predicha']}
-                           for e in top_demanda])
-    fig, ax = plt.subplots(figsize=(10, 3.6))
-    ax.barh(df_top['Producto'][::-1], df_top['Unidades'][::-1],
-            color=C_ACCENT_SOFT, edgecolor=C_BG, linewidth=0.5, height=0.6)
-    ax.set_title('Productos con mayor demanda estimada', fontweight='bold', fontsize=12, pad=10)
-    ax.spines[['top', 'right']].set_visible(False)
-    for i, v in enumerate(df_top['Unidades'][::-1]):
-        ax.text(v + max(df_top['Unidades'])*0.02, i, f'{v:.0f}', va='center',
-               fontsize=9, color=C_TEXT, fontweight='bold')
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close()
+            if error:
+                st.error(error)
+                return
+
+            st.success(f"Archivo leído: {len(df_raw):,} filas · {len(df_raw.columns)} columnas")
+
+            mapeo, faltantes = detectar_columnas(df_raw)
+
+            if faltantes:
+                st.warning(f"No se detectaron automáticamente: **{', '.join(faltantes)}**. "
+                          "Selecciona a qué columna corresponde cada campo:")
+                cols = df_raw.columns.tolist()
+                manual = {}
+                for campo in faltantes:
+                    manual[campo] = st.selectbox(f"Columna para '{campo}'", cols, key=f"m_{campo}")
+                mapeo.update(manual)
+            else:
+                st.info(f"Columnas detectadas — fecha: **{mapeo['fecha']}** · "
+                       f"producto: **{mapeo['producto']}** · "
+                       f"cantidad: **{mapeo['cantidad']}** · "
+                       f"precio: **{mapeo['precio']}**")
+
+            if st.button("Analizar mi información", type="primary", use_container_width=True):
+                with st.spinner("Procesando tu historial de ventas..."):
+                    payload, err = entrenar(
+                        df_raw, mapeo['fecha'], mapeo['producto'],
+                        mapeo['cantidad'], mapeo['precio'], mapeo.get('pais')
+                    )
+                if err:
+                    st.error(err)
+                else:
+                    st.session_state['payload'] = payload
+                    st.success("Listo. Tu información fue procesada correctamente.")
+                    c1, c2, c3 = st.columns(3)
+                    with c1: metric_card("Registros", f"{len(payload['df']):,}", "ventas válidas")
+                    with c2: metric_card("Productos", f"{payload['df_agg']['Producto'].nunique():,}", "detectados")
+                    with c3: metric_card("Confiabilidad", f"{payload['confiabilidad']:.0f}%", "del modelo")
+                    st.info("Ve a la pestaña Inicio para ver tu panel.")
+
+        elif 'payload' in st.session_state:
+            st.success("Ya tienes datos cargados. Puedes subir un archivo nuevo para reemplazarlos.")
+
+    with t2:
+        subtle_header("Usuarios con acceso")
+        st.dataframe(pd.DataFrame([
+            {'Usuario': 'admin',    'Rol': 'Administrador'},
+            {'Usuario': 'gerente',  'Rol': 'Gerencia'},
+            {'Usuario': 'analista', 'Rol': 'Análisis y reportes'},
+        ]), use_container_width=True, hide_index=True)
 
     footer_credits()
 
 
-# ============================================================
-#  VISTA: MI INVENTARIO
-# ============================================================
-def view_inventario():
-    payload = st.session_state['payload']
-    df_agg  = payload['df_agg']
-    productos = sorted(df_agg['Producto'].unique())
+# ── Página: Inicio ────────────────────────────────────────────
 
-    if 'stock_data' not in st.session_state:
-        st.session_state['stock_data'] = {}
-
-    preseleccionado = st.session_state.pop('producto_detalle', None)
-
-    subtle_header("Buscar un producto")
-    col1, col2, col3 = st.columns([2.4, 1, 1])
-    with col1:
-        idx = productos.index(preseleccionado) if preseleccionado in productos else 0
-        producto = st.selectbox("Producto", productos, index=idx, label_visibility="collapsed")
-    with col2:
-        valor_default = st.session_state['stock_data'].get(
-            producto, int(df_agg[df_agg['Producto']==producto]['Cantidad'].mean()*2))
-        stock_actual = st.number_input("Stock actual", min_value=0, max_value=1000000,
-                                       value=valor_default, step=1)
-        st.session_state['stock_data'][producto] = stock_actual
-    with col3:
-        horizonte = st.selectbox("Horizonte", [1, 2, 3, 4],
-                                 format_func=lambda x: f"{x} semana(s)")
-
-    # Obtener país por defecto del producto
-    pais_default = df_agg[df_agg['Producto']==producto]['Pais'].mode().iloc[0]
-    pais = st.selectbox("País", sorted(df_agg['Pais'].unique()),
-                        index=list(sorted(df_agg['Pais'].unique())).index(pais_default))
-
-    info = calcular_estado_inventario(payload, producto, stock_actual, pais, semanas_adelante=horizonte)
-    if info is None:
-        st.warning("No hay suficiente historial para este producto.")
+def page_inicio():
+    if 'payload' not in st.session_state:
+        st.markdown("## Bienvenido a StockSense")
+        st.markdown("Sube tu historial de ventas desde **Configuración y datos** para comenzar.")
+        c1, c2 = st.columns([1.3, 1])
+        with c1:
+            subtle_header("Cómo empezar")
+            st.markdown("""
+            1. Ve a **Configuración y datos** en el menú lateral y sube tu archivo.
+            2. El sistema analiza tu información automáticamente.
+            3. En segundos tienes alertas, predicciones y reportes listos.
+            """)
+            if st.button("Subir mi historial de ventas", type="primary", use_container_width=True):
+                st.session_state['_cfg'] = True
+                st.rerun()
+        with c2:
+            subtle_header("Qué obtienes")
+            st.markdown("""
+            - Qué productos se te van a acabar
+            - Qué productos te están sobrando
+            - Cuánto vas a vender la próxima semana
+            - Cuándo y cuánto reponer
+            - Reportes para tu equipo o proveedores
+            """)
+        footer_credits()
         return
 
-    estado_labels = {
+    p = st.session_state['payload']
+    df_agg = p['df_agg']
+    productos = df_agg['Producto'].unique()
+
+    if 'stocks' not in st.session_state:
+        st.session_state['stocks'] = {}
+
+    estados = []
+    for prod in productos[:60]:
+        s = st.session_state['stocks'].get(prod)
+        if s is None:
+            h = df_agg[df_agg['Producto']==prod]['Cantidad']
+            s = int(h.mean()*2) if len(h) else 50
+            st.session_state['stocks'][prod] = s
+        info = estado_inventario(p, prod, s)
+        info['producto'] = prod
+        info['stock'] = s
+        estados.append(info)
+
+    criticos = [e for e in estados if e['estado']=='critico']
+    atencion = [e for e in estados if e['estado']=='atencion']
+    exceso   = [e for e in estados if e['estado']=='exceso']
+    dem_total = sum(e['dem'] for e in estados)
+
+    st.caption(f"Actualizado: {p['ts'].strftime('%d/%m/%Y %H:%M')} · Confiabilidad: {p['confiabilidad']:.0f}%")
+
+    c1,c2,c3,c4 = st.columns(4)
+    with c1: metric_card("Por agotarse", str(len(criticos)), "riesgo crítico", "danger")
+    with c2: metric_card("Necesitan atención", str(len(atencion)), "bajo nivel ideal", "warning")
+    with c3: metric_card("Con exceso", str(len(exceso)), "sobrestock", "info")
+    with c4: metric_card("Ventas próx. semana", f"{dem_total:,.0f}", "unidades estimadas", "success")
+
+    section_header("Productos que se van a agotar")
+    if criticos:
+        for e in sorted(criticos, key=lambda x: x['dias'])[:8]:
+            ca, cb = st.columns([4,1])
+            with ca:
+                st.markdown(f"""<div class="product-row danger">
+                    <b>{e['producto'][:60]}</b><br>
+                    <span style="font-size:13px;">Se agota en {e['dias']} días · Stock: {e['stock']} · Pedir {e['unis']} unidades antes del {e['fecha']}</span>
+                </div>""", unsafe_allow_html=True)
+            with cb:
+                if st.button("Ver", key=f"v_{e['producto']}", use_container_width=True):
+                    st.session_state['_det'] = e['producto']
+                    st.session_state['_inv'] = True
+                    st.rerun()
+    else:
+        st.markdown('<div class="alert-success">No hay productos en riesgo crítico.</div>', unsafe_allow_html=True)
+
+    section_header("Productos con sobrestock")
+    if exceso:
+        for e in exceso[:5]:
+            st.markdown(f"""<div class="product-row warning">
+                <b>{e['producto'][:60]}</b><br>
+                <span style="font-size:13px;">Stock: {e['stock']} · Demanda estimada: {e['dem']} unidades/semana</span>
+            </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="alert-success">No se detecta sobrestock relevante.</div>', unsafe_allow_html=True)
+
+    section_header("Demanda estimada próxima semana")
+    top = sorted(estados, key=lambda x: -x['dem'])[:6]
+    df_top = pd.DataFrame([{'Producto': e['producto'][:38], 'Unidades': e['dem']} for e in top])
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+    ax.barh(df_top['Producto'][::-1], df_top['Unidades'][::-1], color=C_ACCENT_SOFT, edgecolor=C_BG, height=0.6)
+    ax.set_title('Top productos por demanda estimada', fontweight='bold', fontsize=11, pad=8)
+    ax.spines[['top','right']].set_visible(False)
+    mx = df_top['Unidades'].max() if df_top['Unidades'].max() > 0 else 1
+    for i, v in enumerate(df_top['Unidades'][::-1]):
+        ax.text(v + mx*0.02, i, f'{v:.0f}', va='center', fontsize=9, color=C_TEXT, fontweight='bold')
+    plt.tight_layout()
+    st.pyplot(fig)
+    plt.close()
+    footer_credits()
+
+
+# ── Página: Inventario ────────────────────────────────────────
+
+def page_inventario():
+    p = st.session_state['payload']
+    df_agg = p['df_agg']
+    productos = sorted(df_agg['Producto'].unique())
+
+    if 'stocks' not in st.session_state:
+        st.session_state['stocks'] = {}
+
+    presel = st.session_state.pop('_det', None)
+    subtle_header("Buscar producto")
+    c1, c2 = st.columns([3,1])
+    with c1:
+        idx = productos.index(presel) if presel in productos else 0
+        prod = st.selectbox("Producto", productos, index=idx, label_visibility="collapsed")
+    with c2:
+        default = st.session_state['stocks'].get(prod,
+            int(df_agg[df_agg['Producto']==prod]['Cantidad'].mean()*2))
+        stock = st.number_input("Stock actual", min_value=0, max_value=1000000, value=default, step=1)
+        st.session_state['stocks'][prod] = stock
+
+    info = estado_inventario(p, prod, stock)
+    labels = {
         'critico':  ('Riesgo crítico de desabastecimiento', 'alert-danger'),
         'atencion': ('Requiere reposición pronto', 'alert-warning'),
         'exceso':   ('Sobrestock detectado', 'alert-warning'),
         'optimo':   ('Nivel óptimo', 'alert-success'),
     }
-    texto, clase = estado_labels[info['estado']]
-    st.markdown(f'<div class="{clase}">{texto}</div>', unsafe_allow_html=True)
+    txt, cls = labels[info['estado']]
+    st.markdown(f'<div class="{cls}">{txt}</div>', unsafe_allow_html=True)
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: metric_card("Demanda estimada", f"{info['demanda_predicha']:,}", f"unidades en {horizonte} semana(s)")
-    with col2: metric_card("Stock de seguridad", f"{info['stock_seguridad']:,}", "mínimo recomendado")
-    with col3: metric_card("Punto de reposición", f"{info['punto_reposicion']:,}", "umbral para pedir")
-    with col4: metric_card("Cobertura actual", f"{info['dias_cobertura']} días", "con el stock de hoy")
+    c1,c2,c3,c4 = st.columns(4)
+    with c1: metric_card("Demanda estimada", f"{info['dem']:,}", "unidades próx. semana")
+    with c2: metric_card("Stock mínimo", f"{info['seg']:,}", "stock de seguridad")
+    with c3: metric_card("Reponer cuando queden", f"{info['repo']:,}", "unidades")
+    with c4: metric_card("Cobertura actual", f"{info['dias']} días", "con el stock de hoy")
 
-    if info['unidades_sugeridas'] > 0:
-        st.markdown(f"""
-        <div class="alert-warning">
-            Te recomendamos pedir <b>{info['unidades_sugeridas']} unidades</b>
-            antes del <b>{info['fecha_sugerida']}</b> para evitar quiebre de stock.
-        </div>""", unsafe_allow_html=True)
+    if info['unis'] > 0:
+        st.markdown(f'<div class="alert-warning">Recomendamos pedir <b>{info["unis"]} unidades</b> antes del <b>{info["fecha"]}</b>.</div>', unsafe_allow_html=True)
 
-    section_header(f"Histórico de ventas — {producto[:50]}")
-    hist = df_agg[df_agg['Producto'] == producto].sort_values(['Anio', 'Semana'])
+    section_header(f"Historial de ventas — {prod[:50]}")
+    hist = df_agg[df_agg['Producto']==prod].sort_values(['Anio','Semana'])
     if len(hist) > 1:
-        fig, ax = plt.subplots(figsize=(12, 4))
-        x_labels = [f"S{int(s)}-{int(a)}" for s, a in zip(hist['Semana'], hist['Anio'])]
-        ax.plot(range(len(hist)), hist['Cantidad'], color=C_ACCENT_SOFT,
-               linewidth=2.2, marker='o', markersize=4, markerfacecolor=C_ACCENT_SOFT)
+        fig, ax = plt.subplots(figsize=(12,4))
+        ax.plot(range(len(hist)), hist['Cantidad'], color=C_ACCENT_SOFT, linewidth=2, marker='o', markersize=4)
         ax.fill_between(range(len(hist)), hist['Cantidad'], alpha=0.15, color=C_ACCENT_SOFT)
-        ax.axhline(info['demanda_predicha'] / horizonte, color=C_SUCCESS, linestyle='--', linewidth=2,
-                  label=f"Promedio semanal estimado: {info['demanda_predicha'] / horizonte:.0f}")
-        step = max(1, len(x_labels)//12)
-        ax.set_xticks(range(0, len(x_labels), step))
-        ax.set_xticklabels(x_labels[::step], rotation=40, fontsize=8)
-        ax.set_ylabel('Unidades vendidas')
-        ax.spines[['top', 'right']].set_visible(False)
+        ax.axhline(info['dem'], color=C_SUCCESS, linestyle='--', linewidth=2, label=f"Predicción: {info['dem']}")
+        labels_x = [f"S{int(s)}" for s in hist['Semana']]
+        step = max(1, len(labels_x)//12)
+        ax.set_xticks(range(0, len(labels_x), step))
+        ax.set_xticklabels(labels_x[::step], rotation=40, fontsize=8)
+        ax.set_ylabel('Unidades')
+        ax.spines[['top','right']].set_visible(False)
         leg = ax.legend(facecolor=C_CARD, edgecolor=C_CARD_BORDER, fontsize=9)
-        for text in leg.get_texts(): text.set_color(C_TEXT)
-        ax.grid(True, alpha=0.25)
+        for t in leg.get_texts(): t.set_color(C_TEXT)
+        ax.grid(True, alpha=0.2)
         plt.tight_layout()
         st.pyplot(fig)
         plt.close()
     else:
-        st.info("Historial insuficiente para mostrar tendencia gráfica.")
+        st.info("Historial insuficiente para mostrar el gráfico.")
 
-    section_header("Todos tus productos")
-    busqueda = st.text_input("Buscar producto por nombre", placeholder="Escribe para filtrar...",
-                             label_visibility="collapsed")
-    productos_filtrados = [p for p in productos if busqueda.lower() in p.lower()] if busqueda else productos
-
-    LIMITE_TABLA = 300
+    section_header("Todos los productos")
     tabla = []
-    for p in productos_filtrados[:LIMITE_TABLA]:
-        s = st.session_state['stock_data'].get(p)
-        if s is None:
-            s = int(df_agg[df_agg['Producto']==p]['Cantidad'].mean()*2)
-        i = calcular_estado_inventario(payload, p, s)
-        if i:
-            tabla.append({
-                'Producto': p[:50],
-                'Stock actual': s,
-                'Demanda estimada (1 sem.)': i['demanda_predicha'],
-                'Estado': {'critico':'Crítico','atencion':'Atención',
-                          'exceso':'Exceso','optimo':'Óptimo'}[i['estado']],
-            })
-
-    if len(productos_filtrados) > LIMITE_TABLA:
-        st.caption(f"Mostrando los primeros {LIMITE_TABLA} de {len(productos_filtrados):,} productos encontrados. "
-                  "Usa el buscador para encontrar uno específico.")
-    elif busqueda:
-        st.caption(f"{len(productos_filtrados):,} producto(s) encontrado(s) de {len(productos):,} en total.")
-
-    st.dataframe(pd.DataFrame(tabla), use_container_width=True, height=380)
+    for pp in productos[:200]:
+        s = st.session_state['stocks'].get(pp, int(df_agg[df_agg['Producto']==pp]['Cantidad'].mean()*2))
+        i = estado_inventario(p, pp, s)
+        tabla.append({
+            'Producto': pp[:50], 'Stock': s, 'Demanda estimada': i['dem'],
+            'Estado': {'critico':'Crítico','atencion':'Atención','exceso':'Exceso','optimo':'Óptimo'}[i['estado']],
+        })
+    st.dataframe(pd.DataFrame(tabla), use_container_width=True, height=360)
     footer_credits()
 
 
-# ============================================================
-#  VISTA: PREDICCIONES
-# ============================================================
-def view_predicciones():
-    payload = st.session_state['payload']
-    df_agg  = payload['df_agg']
+# ── Página: Predicciones ──────────────────────────────────────
 
-    if 'stock_data' not in st.session_state:
-        st.session_state['stock_data'] = {}
+def page_predicciones():
+    p = st.session_state['payload']
+    df_agg = p['df_agg']
 
-    col_txt, col_h = st.columns([3, 1])
-    with col_txt:
-        st.markdown("Planifica tus próximos pedidos antes de que falte stock. "
-                   "Los productos se ordenan por urgencia: primero los que necesitas reponer más pronto.")
-    with col_h:
-        horizonte = st.selectbox("Horizonte de planificación", [1, 2, 3, 4],
-                                 format_func=lambda x: f"Próximas {x} semana(s)")
+    if 'stocks' not in st.session_state:
+        st.session_state['stocks'] = {}
+
+    st.markdown("Planifica tus próximos pedidos antes de que falte stock. "
+               "Los productos se ordenan por urgencia.")
 
     productos = df_agg['Producto'].unique()
     eventos = []
-    for p in productos[:80]:
-        s = st.session_state['stock_data'].get(p)
+    for prod in productos[:80]:
+        s = st.session_state['stocks'].get(prod)
         if s is None:
-            s = int(df_agg[df_agg['Producto']==p]['Cantidad'].mean()*2)
-            st.session_state['stock_data'][p] = s
-        info = calcular_estado_inventario(payload, p, s, semanas_adelante=horizonte)
-        if info and info['unidades_sugeridas'] > 0:
-            info['producto'] = p
+            h = df_agg[df_agg['Producto']==prod]['Cantidad']
+            s = int(h.mean()*2) if len(h) else 50
+            st.session_state['stocks'][prod] = s
+        info = estado_inventario(p, prod, s)
+        if info['unis'] > 0:
+            info['producto'] = prod
             eventos.append(info)
 
-    eventos = sorted(eventos, key=lambda x: x['fecha_sugerida_dt'])
+    eventos = sorted(eventos, key=lambda x: x['fecha_dt'])
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        metric_card("Pedidos pendientes", f"{len(eventos)}", "productos a reponer", "warning")
-    with col2:
-        proximos_7d = [e for e in eventos if (e['fecha_sugerida_dt'] - datetime.now()).days <= 7]
-        metric_card("Urgentes (7 días)", f"{len(proximos_7d)}", "requieren pedido esta semana", "danger")
-    with col3:
-        total_unidades = sum(e['unidades_sugeridas'] for e in eventos)
-        metric_card("Unidades a pedir", f"{total_unidades:,}", "en total, todos los productos", "info")
+    c1,c2,c3 = st.columns(3)
+    with c1: metric_card("Pedidos pendientes", str(len(eventos)), "productos a reponer", "warning")
+    prox7 = [e for e in eventos if (e['fecha_dt']-datetime.now()).days <= 7]
+    with c2: metric_card("Urgentes esta semana", str(len(prox7)), "requieren pedido pronto", "danger")
+    total_u = sum(e['unis'] for e in eventos)
+    with c3: metric_card("Unidades totales a pedir", f"{total_u:,}", "en todos los productos", "info")
 
     section_header("Calendario de reposición")
+
+    MESES = {1:'ENE',2:'FEB',3:'MAR',4:'ABR',5:'MAY',6:'JUN',
+             7:'JUL',8:'AGO',9:'SEP',10:'OCT',11:'NOV',12:'DIC'}
+
     if not eventos:
-        st.markdown('<div class="alert-success">No hay pedidos pendientes por ahora. Tu inventario está en buen estado.</div>',
-                   unsafe_allow_html=True)
-        footer_credits()
-        return
+        st.markdown('<div class="alert-success">No hay pedidos pendientes. Tu inventario está en buen estado.</div>', unsafe_allow_html=True)
+    else:
+        for e in eventos[:25]:
+            dias = (e['fecha_dt']-datetime.now()).days
+            if dias <= 3: color, bg = C_DANGER, C_DANGER_BG
+            elif dias <= 10: color, bg = C_WARNING, C_WARNING_BG
+            else: color, bg = C_ACCENT_SOFT, C_BG_SOFT
 
-    meses_es = {1:'ENE',2:'FEB',3:'MAR',4:'ABR',5:'MAY',6:'JUN',
-               7:'JUL',8:'AGO',9:'SEP',10:'OCT',11:'NOV',12:'DIC'}
+            urgencia = "Urgente" if dias <= 3 else ("Próximamente" if dias <= 10 else "Planificado")
 
-    for e in eventos[:25]:
-        dias_restantes = (e['fecha_sugerida_dt'] - datetime.now()).days
-        if dias_restantes <= 3:
-            color_box, bg_box = C_DANGER, C_DANGER_BG
-        elif dias_restantes <= 10:
-            color_box, bg_box = C_WARNING, C_WARNING_BG
-        else:
-            color_box, bg_box = C_ACCENT_SOFT, C_BG_SOFT
-
-        col_fecha, col_info, col_btn = st.columns([0.9, 4, 1])
-        with col_fecha:
-            st.markdown(f"""
-            <div class="repo-date-box" style="background:{bg_box}; color:{color_box};">
-                <div class="day">{e['fecha_sugerida_dt'].day}</div>
-                <div class="mon">{meses_es[e['fecha_sugerida_dt'].month]}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col_info:
-            urgencia = "Urgente" if dias_restantes <= 3 else ("Próximamente" if dias_restantes <= 10 else "Planificado")
-            st.markdown(f"""
-            <div style="padding-top:4px;">
-                <b style="color:{C_TEXT};">{e['producto'][:55]}</b><br>
-                <span style="font-size:13px; color:{C_TEXT_DIM};">
-                    {urgencia} · Pedir <b style="color:{C_TEXT};">{e['unidades_sugeridas']} unidades</b> ·
-                    Cobertura actual: {e['dias_cobertura']} días
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-        with col_btn:
-            if st.button("Ver producto", key=f"repo_{e['producto']}", use_container_width=True):
-                st.session_state['producto_detalle'] = e['producto']
-                st.session_state['_force_inventario'] = True
-                st.rerun()
-        st.markdown("<div style='height:2px;'></div>", unsafe_allow_html=True)
+            ca, cb, cc = st.columns([0.9, 4, 1])
+            with ca:
+                st.markdown(f"""
+                <div style="min-width:70px; text-align:center; padding:10px;
+                            background:{bg}; border-radius:10px; color:{color};
+                            font-weight:800; margin-top:4px;">
+                    <div style="font-size:20px; line-height:1;">{e['fecha_dt'].day}</div>
+                    <div style="font-size:10px; letter-spacing:0.5px;">{MESES[e['fecha_dt'].month]}</div>
+                </div>""", unsafe_allow_html=True)
+            with cb:
+                st.markdown(f"""
+                <div style="padding-top:6px;">
+                    <b style="color:{C_TEXT};">{e['producto'][:55]}</b><br>
+                    <span style="font-size:13px; color:{C_TEXT_DIM};">
+                        {urgencia} · Pedir <b style="color:{C_TEXT};">{e['unis']} unidades</b> · Cobertura: {e['dias']} días
+                    </span>
+                </div>""", unsafe_allow_html=True)
+            with cc:
+                if st.button("Ver producto", key=f"r_{e['producto']}", use_container_width=True):
+                    st.session_state['_det'] = e['producto']
+                    st.session_state['_inv'] = True
+                    st.rerun()
+            st.markdown("<div style='height:2px;'></div>", unsafe_allow_html=True)
 
     footer_credits()
 
 
-# ============================================================
-#  VISTA: REPORTES
-# ============================================================
-def view_reportes():
-    payload = st.session_state['payload']
-    df_agg  = payload['df_agg']
+# ── Página: Reportes ──────────────────────────────────────────
 
-    if 'stock_data' not in st.session_state:
-        st.session_state['stock_data'] = {}
+def page_reportes():
+    p = st.session_state['payload']
+    df_agg = p['df_agg']
 
-    st.markdown("Descarga un resumen con el estado de tu inventario, las alertas activas "
-               "y las predicciones de demanda, listo para compartir con tu equipo de compras o tus proveedores.")
+    if 'stocks' not in st.session_state:
+        st.session_state['stocks'] = {}
+
+    st.markdown("Descarga el estado completo de tu inventario con predicciones y alertas.")
 
     productos = df_agg['Producto'].unique()
     filas = []
-    for p in productos[:200]:
-        s = st.session_state['stock_data'].get(p)
-        if s is None:
-            s = int(df_agg[df_agg['Producto']==p]['Cantidad'].mean()*2)
-        i = calcular_estado_inventario(payload, p, s)
-        if i:
-            filas.append({
-                'Producto': p,
-                'Stock actual': s,
-                'Demanda estimada (próx. semana)': i['demanda_predicha'],
-                'Stock de seguridad': i['stock_seguridad'],
-                'Punto de reposición': i['punto_reposicion'],
-                'Días de cobertura': i['dias_cobertura'],
-                'Estado': {'critico':'Crítico','atencion':'Atención',
-                          'exceso':'Exceso','optimo':'Óptimo'}[i['estado']],
-                'Unidades sugeridas a pedir': i['unidades_sugeridas'],
-            })
+    for prod in productos[:200]:
+        s = st.session_state['stocks'].get(prod, int(df_agg[df_agg['Producto']==prod]['Cantidad'].mean()*2))
+        i = estado_inventario(p, prod, s)
+        filas.append({
+            'Producto': prod, 'Stock actual': s,
+            'Demanda (próx. semana)': i['dem'],
+            'Stock mínimo': i['seg'],
+            'Reponer en': i['repo'],
+            'Días de cobertura': i['dias'],
+            'Estado': {'critico':'Crítico','atencion':'Atención','exceso':'Exceso','optimo':'Óptimo'}[i['estado']],
+            'Unidades a pedir': i['unis'],
+        })
 
-    df_reporte = pd.DataFrame(filas)
+    df_rep = pd.DataFrame(filas)
     section_header("Vista previa del reporte")
-    st.dataframe(df_reporte, use_container_width=True, height=340)
+    st.dataframe(df_rep, use_container_width=True, height=340)
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        excel_buffer = generar_reporte_excel(df_reporte)
-        st.download_button("📊 Descargar en Excel (.xlsx)", data=excel_buffer,
-                          file_name=f"reporte_inventario_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                          mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                          use_container_width=True, type="primary")
-    with col2:
-        csv = df_reporte.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("Descargar en CSV", data=csv,
-                          file_name=f"reporte_inventario_{datetime.now().strftime('%Y%m%d')}.csv",
-                          mime='text/csv', use_container_width=True)
-    with col3:
-        resumen_txt = generar_resumen_texto(df_reporte)
-        st.download_button("Resumen ejecutivo (TXT)", data=resumen_txt.encode('utf-8'),
-                          file_name=f"resumen_ejecutivo_{datetime.now().strftime('%Y%m%d')}.txt",
-                          mime='text/plain', use_container_width=True)
-    footer_credits()
-
-
-# ============================================================
-#  VISTA: MODELO (nueva pestaña)
-# ============================================================
-def view_modelo():
-    payload = st.session_state['payload']
-    metricas = payload['metricas']
-    modelo    = payload['modelo']
-    features  = payload['features']  # nombres originales en inglés
-
-    st.markdown("## Rendimiento del modelo predictivo")
-    st.caption("Métricas calculadas sobre el 20% de datos de prueba del dataset Online Retail 2010‑2011.")
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        metric_card("MAE", f"{metricas['mae']:.2f}", "Error absoluto medio (unidades)")
-    with col2:
-        metric_card("RMSE", f"{metricas['rmse']:.2f}", "Raíz del error cuadrático medio")
-    with col3:
-        metric_card("R²", f"{metricas['r2']:.2f}", "Coeficiente de determinación")
-
-    section_header("Importancia de variables")
-    importancias = pd.Series(modelo.feature_importances_, index=features).sort_values()
-    fig, ax = plt.subplots(figsize=(10, 4))
-    importancias.plot.barh(ax=ax, color=C_ACCENT_SOFT, edgecolor=C_BG)
-    ax.set_title('¿Qué variables influyen más en la demanda?', fontweight='bold')
-    ax.spines[['top', 'right']].set_visible(False)
-    for i, v in enumerate(importancias):
-        ax.text(v + 0.005, i, f'{v:.3f}', va='center', fontsize=9, color=C_TEXT)
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close()
-
-    st.caption("Variables ordenadas por importancia relativa según Random Forest.")
+    c1, c2 = st.columns(2)
+    with c1:
+        csv = df_rep.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("Descargar en Excel (CSV)", csv,
+            file_name=f"reporte_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime='text/csv', use_container_width=True, type="primary")
+    with c2:
+        criticos = df_rep[df_rep['Estado']=='Crítico']
+        exceso   = df_rep[df_rep['Estado']=='Exceso']
+        txt = f"""RESUMEN EJECUTIVO — {datetime.now().strftime('%d/%m/%Y %H:%M')}
+{'='*50}
+Ventas estimadas próxima semana: {df_rep['Demanda (próx. semana)'].sum():,.0f} unidades
+Productos en riesgo crítico: {len(criticos)}
+{chr(10).join('- '+str(r['Producto'])[:55]+f" (pedir {r['Unidades a pedir']})" for _,r in criticos.head(15).iterrows())}
+Productos con sobrestock: {len(exceso)}
+{chr(10).join('- '+str(r['Producto'])[:55] for _,r in exceso.head(15).iterrows())}
+{'='*50}
+Generado por StockSense"""
+        st.download_button("Descargar resumen ejecutivo (TXT)", txt.encode('utf-8'),
+            file_name=f"resumen_{datetime.now().strftime('%Y%m%d')}.txt",
+            mime='text/plain', use_container_width=True)
 
     footer_credits()
 
 
-# ============================================================
-#  CONFIGURACIÓN (solo informativa en esta versión)
-# ============================================================
-def view_configuracion():
-    st.markdown("## Configuración y datos")
-    st.info("El modelo ya está pre‑entrenado con el dataset **Online Retail 2010‑2011**. "
-            "No es necesario subir archivos. Si deseas actualizar los datos o el modelo, "
-            "reemplaza los archivos .pkl y .csv en el repositorio y luego presiona 'Recargar modelo' en la barra lateral.")
-    st.markdown("---")
-    st.markdown("**Archivos utilizados:**")
-    st.code("""
-modelo_rf_optimizado.pkl
-scaler.pkl
-le_country.pkl
-features.pkl
-df_agg_online_retail.csv
-    """)
-    footer_credits()
-
-
-# ============================================================
-#  MAIN
-# ============================================================
+# ── Main ──────────────────────────────────────────────────────
 
 def main():
-    # Estado inicial de sesión
-    if 'logged_in' not in st.session_state:
-        st.session_state['logged_in'] = False
-    if not st.session_state['logged_in']:
+    if not st.session_state.get('logged_in'):
         show_login()
         return
-
-    # Carga automática del modelo al iniciar sesión (si aún no se ha cargado)
-    if 'payload' not in st.session_state:
-        with st.spinner('Cargando modelo entrenado y datos históricos...'):
-            payload = cargar_modelo_y_datos()
-            st.session_state['payload'] = payload
-            st.session_state['stock_data'] = {}  # stock simulado
-        st.success("Sistema listo. Navega por las pestañas para explorar tu inventario.")
 
     show_sidebar()
     show_topbar()
 
-    # Si el usuario fuerza ir a inventario desde un botón de detalle
-    if st.session_state.pop('_force_inventario', False):
-        # Cambiamos el índice de pestaña activa manualmente (no soportado directamente,
-        # pero podemos forzar la vista inventario en una segunda llamada).
-        # Para simplificar, redirigimos a la pestaña Inventario recargando con parámetro.
-        st.query_params['tab'] = 'inventario'
-        st.rerun()
+    if st.session_state.pop('_cfg', False):
+        page_config()
+        return
 
-    # Definir pestañas (5 pestañas)
-    labels = ["Inicio", "Mi Inventario", "Predicciones", "Reportes", "Modelo"]
-    tabs = st.tabs(labels)
+    fuerza_inv = st.session_state.pop('_inv', False)
 
-    # Determinar pestaña activa (por defecto Inicio)
-    active_tab = st.query_params.get('tab', 'inicio')
-    tab_index = 0
-    if active_tab == 'inventario':
-        tab_index = 1
-    elif active_tab == 'predicciones':
-        tab_index = 2
-    elif active_tab == 'reportes':
-        tab_index = 3
-    elif active_tab == 'modelo':
-        tab_index = 4
+    if 'payload' not in st.session_state:
+        page_inicio()
+        return
 
-    with tabs[0]: view_inicio()
-    with tabs[1]: view_inventario()
-    with tabs[2]: view_predicciones()
-    with tabs[3]: view_reportes()
-    with tabs[4]: view_modelo()
+    tabs = st.tabs(["Inicio", "Mi Inventario", "Predicciones", "Reportes"])
+    with tabs[0]: page_inicio()
+    with tabs[1]:
+        if fuerza_inv:
+            page_inventario()
+        else:
+            page_inventario()
+    with tabs[2]: page_predicciones()
+    with tabs[3]: page_reportes()
 
 
 if __name__ == "__main__":
