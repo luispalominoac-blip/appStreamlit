@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score, mean_absolute_error
+import time
 
 warnings.filterwarnings('ignore')
 
@@ -206,29 +207,24 @@ def cargar_online_retail(raw_bytes):
     """Carga el ZIP del Online Retail exactamente como en el Colab."""
     try:
         with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
-            # Buscar el xlsx dentro del zip
             xlsx_files = [f for f in z.namelist() if f.endswith('.xlsx') or f.endswith('.xls')]
             if not xlsx_files:
                 return None, "No se encontró un archivo Excel dentro del ZIP."
             with z.open(xlsx_files[0]) as f:
                 df = pd.read_excel(f)
     except zipfile.BadZipFile:
-        # Intentar leer directamente como xlsx
         try:
             df = pd.read_excel(io.BytesIO(raw_bytes))
         except Exception as e:
             return None, f"No se pudo leer el archivo: {e}"
     except Exception as e:
         return None, f"Error al abrir el archivo: {e}"
-
     return df, None
 
 
 def limpiar_datos(df):
     """Limpieza igual que Fase 3 del Colab."""
-    # Detectar nombres de columnas (insensible a mayúsculas)
     col_map = {c.lower().strip(): c for c in df.columns}
-
     col_invoice  = col_map.get('invoiceno',   col_map.get('invoice no', None))
     col_qty      = col_map.get('quantity',     col_map.get('cantidad', None))
     col_price    = col_map.get('unitprice',    col_map.get('unit price', col_map.get('precio', None)))
@@ -238,7 +234,6 @@ def limpiar_datos(df):
     col_stock    = col_map.get('stockcode',    col_map.get('stock code', col_map.get('codigo', None)))
     col_customer = col_map.get('customerid',   col_map.get('customer id', None))
 
-    # Validar columnas mínimas
     missing = []
     if not col_qty:    missing.append('Quantity / Cantidad')
     if not col_price:  missing.append('UnitPrice / Precio')
@@ -248,14 +243,7 @@ def limpiar_datos(df):
         return None, f"No se encontraron columnas requeridas: {', '.join(missing)}"
 
     df = df.copy()
-
-    # Renombrar a nombres estándar
-    rename = {
-        col_date:  'InvoiceDate',
-        col_qty:   'Quantity',
-        col_price: 'UnitPrice',
-        col_desc:  'Description',
-    }
+    rename = {col_date: 'InvoiceDate', col_qty: 'Quantity', col_price: 'UnitPrice', col_desc: 'Description'}
     if col_country:  rename[col_country]  = 'Country'
     if col_invoice:  rename[col_invoice]  = 'InvoiceNo'
     if col_stock:    rename[col_stock]    = 'StockCode'
@@ -265,31 +253,23 @@ def limpiar_datos(df):
     if 'Country' not in df.columns:  df['Country']   = 'General'
     if 'InvoiceNo' not in df.columns: df['InvoiceNo'] = 'N/A'
 
-    # Limpieza exacta del Colab
     df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'], errors='coerce')
     df['Quantity']    = pd.to_numeric(df['Quantity'], errors='coerce')
     df['UnitPrice']   = pd.to_numeric(df['UnitPrice'], errors='coerce')
 
-    # Eliminar cancelaciones
     df = df[~df['InvoiceNo'].astype(str).str.startswith('C')]
-    # Eliminar negativos y ceros
     df = df[df['Quantity'] > 0]
     df = df[df['UnitPrice'] > 0]
-    # Eliminar nulos en columnas clave
     df = df.dropna(subset=['InvoiceDate', 'Quantity', 'UnitPrice', 'Description'])
-    # Eliminar duplicados
     df = df.drop_duplicates()
 
     if len(df) < 10:
         return None, "Quedan menos de 10 registros válidos después de la limpieza."
-
     return df, None
 
 
 def agregar_y_entrenar(df):
     """Ingeniería de características y entrenamiento igual que Fases 3-4 del Colab."""
-
-    # Variables temporales (igual que 3.2.1)
     df['Month']      = df['InvoiceDate'].dt.month
     df['Quarter']    = df['InvoiceDate'].dt.quarter
     df['DayOfWeek']  = df['InvoiceDate'].dt.dayofweek
@@ -297,7 +277,6 @@ def agregar_y_entrenar(df):
     df['Week']       = df['InvoiceDate'].dt.isocalendar().week.astype(int)
     df['Year']       = df['InvoiceDate'].dt.year
 
-    # Agregación semanal por producto + país (igual que 3.2.2)
     df_agg = df.groupby(['Year', 'Week', 'Description', 'Country']).agg(
         Quantity      = ('Quantity',  'sum'),
         UnitPrice     = ('UnitPrice', 'mean'),
@@ -308,31 +287,26 @@ def agregar_y_entrenar(df):
         Transacciones = ('Quantity',  'count'),
     ).reset_index()
 
-    # Codificación (igual que 3.3.1)
     le_country = LabelEncoder()
     le_product = LabelEncoder()
     df_agg['Country_Code']  = le_country.fit_transform(df_agg['Country'])
     df_agg['Product_Code']  = le_product.fit_transform(df_agg['Description'])
 
-    # Features exactos del Colab (adaptados: Description en lugar de StockCode)
     features = ['UnitPrice', 'Country_Code', 'Month', 'Quarter',
                 'Week', 'DayOfWeek', 'Hour', 'Year', 'Transacciones']
 
     X = df_agg[features]
     y = df_agg['Quantity']
 
-    # División train/test (igual que 3.5)
     if len(df_agg) >= 20:
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     else:
         X_train, X_test, y_train, y_test = X, X, y, y
 
-    # Normalización (igual que 3.6)
     scaler = StandardScaler()
     Xtr = scaler.fit_transform(X_train)
     Xte = scaler.transform(X_test)
 
-    # Random Forest (igual que 4.2.3)
     modelo = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
     modelo.fit(Xtr, y_train)
     y_pred = modelo.predict(Xte)
@@ -460,10 +434,12 @@ def show_sidebar():
         <hr style="border-color:{C['border']};">
         """, unsafe_allow_html=True)
         st.caption(f"Usuario: {st.session_state.get('usuario','').upper()}")
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Cargar / cambiar datos", use_container_width=True):
-            st.session_state['_cfg'] = True
-            st.rerun()
+        if 'payload' in st.session_state:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Borrar datos actuales", use_container_width=True):
+                del st.session_state['payload']
+                st.session_state['stocks'] = {}
+                st.rerun()
         st.markdown(f"<br><hr style='border-color:{C['border']};'>", unsafe_allow_html=True)
         if st.button("Cerrar sesión", use_container_width=True):
             st.session_state.clear()
@@ -487,117 +463,27 @@ def show_topbar():
     </div>""", unsafe_allow_html=True)
 
 
-# ── Página: Cargar datos ──────────────────────────────────────────────────────
-
-def page_carga():
-    st.markdown("## Cargar historial de ventas")
-    st.markdown(f"""
-    <div style="background:{C['bg2']};border:1px solid {C['border']};
-                border-radius:12px;padding:18px 20px;margin-bottom:18px;">
-        <b style="color:{C['text']};">Formatos aceptados</b><br>
-        <span style="color:{C['dim']};font-size:13.5px;">
-        El sistema acepta el archivo <b style="color:{C['text']};">Online Retail ZIP</b>
-        descargado de UCI o Kaggle, o cualquier Excel / CSV con columnas de fecha,
-        producto, cantidad y precio. Las columnas se detectan automáticamente.
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    uploaded = st.file_uploader(
-        "Selecciona tu archivo",
-        type=['zip', 'xlsx', 'xls', 'csv'],
-        help="El archivo Online Retail ZIP funciona directamente sin configuración."
-    )
-
-    if uploaded is not None:
-        # Guardar bytes una sola vez para evitar re-lectura en reruns
-        if st.session_state.get('_last_file') != uploaded.name:
-            st.session_state['_raw']       = uploaded.getvalue()
-            st.session_state['_last_file'] = uploaded.name
-
-        raw = st.session_state['_raw']
-
-        # Determinar tipo y cargar
-        fname = uploaded.name.lower()
-        if fname.endswith('.zip'):
-            df_raw, err = cargar_online_retail(raw)
-        elif fname.endswith(('.xlsx', '.xls')):
-            try:
-                df_raw, err = pd.read_excel(io.BytesIO(raw)), None
-            except Exception as e:
-                df_raw, err = None, str(e)
-        else:
-            try:
-                df_raw, err = pd.read_csv(io.BytesIO(raw)), None
-            except Exception as e:
-                df_raw, err = None, str(e)
-
-        if err:
-            st.error(f"No se pudo leer el archivo: {err}")
-            fc()
-            return
-
-        st.success(f"Archivo leído: **{len(df_raw):,} filas** · {len(df_raw.columns)} columnas detectadas")
-
-        with st.expander("Ver columnas del archivo"):
-            st.write(list(df_raw.columns))
-
-        if st.button("Analizar y entrenar modelo", type="primary", use_container_width=True):
-            with st.spinner("Limpiando datos y entrenando el modelo..."):
-                df_limpio, err2 = limpiar_datos(df_raw)
-                if err2:
-                    st.error(err2)
-                    fc()
-                    return
-                payload, err3 = agregar_y_entrenar(df_limpio)
-                if err3:
-                    st.error(err3)
-                    fc()
-                    return
-
-            st.session_state['payload'] = payload
-            st.session_state['stocks']  = {}
-            st.success("Modelo entrenado correctamente.")
-
-            c1, c2, c3 = st.columns(3)
-            with c1: mcard("Registros válidos", f"{len(payload['df']):,}", "tras limpieza", "i")
-            with c2: mcard("Productos", f"{payload['df_agg']['Description'].nunique():,}", "artículos distintos", "i")
-            with c3: mcard("Confiabilidad", f"{payload['confiabilidad']:.0f}%", "del modelo predictivo", "s")
-            st.info("Ve a la pestaña **Inicio** para ver tu panel completo.")
-
-    elif 'payload' in st.session_state:
-        st.success("Ya tienes datos cargados. Sube un archivo nuevo para reemplazarlos.")
-
-    fc()
-
-
 # ── Página: Inicio ────────────────────────────────────────────────────────────
 
 def page_inicio():
     if 'payload' not in st.session_state:
         st.markdown("## Bienvenido a StockSense")
-        st.markdown("Carga tu historial de ventas desde el menú lateral para comenzar.")
-        c1, c2 = st.columns([1.3, 1])
-        with c1:
-            subh("Cómo empezar")
-            st.markdown("""
-            1. Haz clic en **Cargar / cambiar datos** en el menú lateral.
-            2. Sube tu archivo (ZIP del Online Retail, Excel o CSV).
-            3. El sistema analiza y entrena el modelo automáticamente.
-            4. Tu panel de alertas y predicciones estará listo en segundos.
-            """)
-            if st.button("Ir a cargar datos", type="primary"):
-                st.session_state['_cfg'] = True
-                st.rerun()
+        st.markdown("""
+        <div style="background:{C['bg2']};border:1px solid {C['border']};
+                    border-radius:12px;padding:22px 24px;margin:20px 0;">
+            <b style="color:{C['text']};">Comienza cargando tu historial de ventas</b><br>
+            <span style="color:{C['dim']};font-size:14px;">
+            Usa la pestaña <b style="color:{C['text']};">Cargar datos</b> para subir
+            el archivo Online Retail ZIP o un Excel / CSV con fecha, producto, cantidad y precio.
+            El sistema analizará los datos y entrenará un modelo de Machine Learning automáticamente.
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([1, 1, 1])
         with c2:
-            subh("Qué obtienes")
-            st.markdown("""
-            - Qué productos se te van a agotar
-            - Qué productos tienen exceso de stock
-            - Cuánto vas a vender la próxima semana
-            - Cuándo y cuánto reponer en cada producto
-            - Reportes descargables para tu equipo
-            """)
+            if st.button("Ir a Cargar datos", use_container_width=True, type="primary"):
+                st.session_state['active_tab'] = 1
+                st.rerun()
         fc()
         return
 
@@ -650,7 +536,7 @@ def page_inicio():
             with cb:
                 if st.button("Ver", key=f"v_{e['prod'][:30]}", use_container_width=True):
                     st.session_state['_det'] = e['prod']
-                    st.session_state['_inv'] = True
+                    st.session_state['active_tab'] = 2  # Inventario
                     st.rerun()
     else:
         ad("No hay productos en riesgo crítico de desabastecimiento.", "s")
@@ -685,9 +571,99 @@ def page_inicio():
     fc()
 
 
+# ── Página: Cargar datos ─────────────────────────────────────────────────────
+
+def page_carga():
+    st.markdown("## Cargar historial de ventas")
+    st.markdown(f"""
+    <div style="background:{C['bg2']};border:1px solid {C['border']};
+                border-radius:12px;padding:18px 20px;margin-bottom:18px;">
+        <b style="color:{C['text']};">Formatos aceptados</b><br>
+        <span style="color:{C['dim']};font-size:13.5px;">
+        El sistema acepta el archivo <b style="color:{C['text']};">Online Retail ZIP</b>
+        descargado de UCI o Kaggle, o cualquier Excel / CSV con columnas de fecha,
+        producto, cantidad y precio. Las columnas se detectan automáticamente.
+        </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    uploaded = st.file_uploader(
+        "Selecciona tu archivo",
+        type=['zip', 'xlsx', 'xls', 'csv'],
+        help="El archivo Online Retail ZIP funciona directamente sin configuración."
+    )
+
+    if uploaded is not None:
+        if st.session_state.get('_last_file') != uploaded.name:
+            st.session_state['_raw']       = uploaded.getvalue()
+            st.session_state['_last_file'] = uploaded.name
+
+        raw = st.session_state['_raw']
+        fname = uploaded.name.lower()
+
+        if fname.endswith('.zip'):
+            df_raw, err = cargar_online_retail(raw)
+        elif fname.endswith(('.xlsx', '.xls')):
+            try:
+                df_raw, err = pd.read_excel(io.BytesIO(raw)), None
+            except Exception as e:
+                df_raw, err = None, str(e)
+        else:
+            try:
+                df_raw, err = pd.read_csv(io.BytesIO(raw)), None
+            except Exception as e:
+                df_raw, err = None, str(e)
+
+        if err:
+            st.error(f"No se pudo leer el archivo: {err}")
+            fc()
+            return
+
+        st.success(f"Archivo leído: **{len(df_raw):,} filas** · {len(df_raw.columns)} columnas detectadas")
+
+        with st.expander("Ver columnas del archivo"):
+            st.write(list(df_raw.columns))
+
+        if st.button("Analizar y entrenar modelo", type="primary", use_container_width=True):
+            with st.status("Analizando datos, por favor espera...", expanded=True) as status:
+                st.write("Limpiando registros inválidos...")
+                df_limpio, err2 = limpiar_datos(df_raw)
+                if err2:
+                    st.error(err2)
+                    status.update(label="Error en la limpieza", state="error")
+                    return
+                st.write(f"Datos válidos: {len(df_limpio):,} filas")
+                st.write("Agregando por semana y entrenando modelo Random Forest...")
+                payload, err3 = agregar_y_entrenar(df_limpio)
+                if err3:
+                    st.error(err3)
+                    status.update(label="Error en el entrenamiento", state="error")
+                    return
+                status.update(label="Modelo entrenado correctamente", state="complete")
+
+            st.session_state['payload'] = payload
+            st.session_state['stocks']  = {}
+            st.success("Modelo entrenado correctamente.")
+            st.info("Redirigiendo al panel de inicio...")
+            time.sleep(1)
+            st.session_state['active_tab'] = 0
+            st.rerun()
+
+    elif 'payload' in st.session_state:
+        st.success("Ya tienes datos cargados. Puedes subir un archivo nuevo para reemplazarlos.")
+    fc()
+
+
 # ── Página: Inventario ────────────────────────────────────────────────────────
 
 def page_inventario():
+    if 'payload' not in st.session_state:
+        st.warning("Primero carga un archivo de ventas en la pestaña 'Cargar datos'.")
+        if st.button("Ir a Cargar datos"):
+            st.session_state['active_tab'] = 1
+            st.rerun()
+        return
+
     p      = st.session_state['payload']
     df_agg = p['df_agg']
     prods  = sorted(df_agg['Description'].unique())
@@ -773,6 +749,13 @@ def page_inventario():
 # ── Página: Predicciones / Calendario ────────────────────────────────────────
 
 def page_predicciones():
+    if 'payload' not in st.session_state:
+        st.warning("Primero carga un archivo de ventas en la pestaña 'Cargar datos'.")
+        if st.button("Ir a Cargar datos"):
+            st.session_state['active_tab'] = 1
+            st.rerun()
+        return
+
     p      = st.session_state['payload']
     df_agg = p['df_agg']
 
@@ -842,7 +825,7 @@ def page_predicciones():
             with cc:
                 if st.button("Ver", key=f"r_{e['prod'][:30]}", use_container_width=True):
                     st.session_state['_det'] = e['prod']
-                    st.session_state['_inv'] = True
+                    st.session_state['active_tab'] = 2  # Inventario
                     st.rerun()
             st.markdown("<div style='height:3px;'></div>", unsafe_allow_html=True)
     fc()
@@ -851,6 +834,13 @@ def page_predicciones():
 # ── Página: Reportes ──────────────────────────────────────────────────────────
 
 def page_reportes():
+    if 'payload' not in st.session_state:
+        st.warning("Primero carga un archivo de ventas en la pestaña 'Cargar datos'.")
+        if st.button("Ir a Cargar datos"):
+            st.session_state['active_tab'] = 1
+            st.rerun()
+        return
+
     p      = st.session_state['payload']
     df_agg = p['df_agg']
 
@@ -933,23 +923,36 @@ def main():
     show_sidebar()
     show_topbar()
 
-    # Pantalla de carga de datos (desde sidebar o si no hay datos)
-    if st.session_state.pop('_cfg', False) or 'payload' not in st.session_state:
-        page_carga()
-        return
+    # Definir pestañas siempre visibles
+    tabs = st.tabs(["Inicio", "Cargar datos", "Mi Inventario", "Predicciones", "Reportes"])
 
-    fuerza_inv = st.session_state.pop('_inv', False)
+    # Obtener índice de pestaña activa desde session_state (por defecto 0)
+    active_tab = st.session_state.get('active_tab', 0)
 
-    tabs = st.tabs(["Inicio", "Mi Inventario", "Predicciones", "Reportes"])
-
-    with tabs[0]: page_inicio()
+    with tabs[0]:
+        page_inicio()
     with tabs[1]:
-        if fuerza_inv and '_det' in st.session_state:
-            page_inventario()
-        else:
-            page_inventario()
-    with tabs[2]: page_predicciones()
-    with tabs[3]: page_reportes()
+        page_carga()
+    with tabs[2]:
+        page_inventario()
+    with tabs[3]:
+        page_predicciones()
+    with tabs[4]:
+        page_reportes()
+
+    # Establecer el tab activo visualmente (parche para forzar el cambio)
+    # Como Streamlit no permite cambiar el tab programáticamente de forma directa,
+    # usamos un pequeño script JS para seleccionar la pestaña deseada.
+    if st.session_state.get('active_tab') is not None:
+        js = f"""
+        <script>
+            var tabs = window.parent.document.querySelectorAll('.stTabs button[data-baseweb="tab"]');
+            if (tabs.length > {st.session_state.active_tab}) {{
+                tabs[{st.session_state.active_tab}].click();
+            }}
+        </script>
+        """
+        st.components.v1.html(js, height=0, width=0)
 
 
 if __name__ == "__main__":
